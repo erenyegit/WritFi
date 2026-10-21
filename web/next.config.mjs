@@ -1,7 +1,17 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
   eslint: { ignoreDuringBuilds: true },
+  // A self-contained server in .next/standalone, for running the site in a
+  // container (see /Dockerfile). Tracing starts at the workspace root, where
+  // pnpm keeps the installed packages. On Vercel the folder is simply unused.
+  output: "standalone",
+  experimental: {
+    outputFileTracingRoot: path.join(path.dirname(fileURLToPath(import.meta.url)), ".."),
+  },
   async redirects() {
     // The site lives at www.writ.fi. On production builds, any *.vercel.app
     // address of this project (writ2.vercel.app and the per-deployment URLs)

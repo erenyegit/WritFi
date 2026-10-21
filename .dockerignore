@@ -1,0 +1,12 @@
+# Keep the build context small, and keep every secret out of the image.
+**/.env*
+!web/.env.example
+**/node_modules
+**/.next
+**/.data
+**/.DS_Store
+.git
+contracts
+docs
+*.md
+!web/**/*.md
