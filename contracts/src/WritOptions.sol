@@ -6,7 +6,9 @@ import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import {IOracleAdapter} from "./interfaces/IOracleAdapter.sol";
@@ -41,16 +43,19 @@ import {OptionMath} from "./libraries/OptionMath.sol";
 ///   btc.balanceOf(this)  == makerBtcFree  + makerBtcReserved  + writerBtcCollateral
 ///
 /// Pricing is off-chain (Black-Scholes over a vol surface); quotes are EIP-712
-/// signed by the quoting maker and verified here. Settlement reads the expiry
-/// price from a pluggable oracle adapter (Pyth first-tick-after-expiry).
+/// signed by the quoting maker's signer and verified here. Settlement reads the
+/// expiry price from a pluggable oracle adapter (Pyth, first tick after expiry).
 ///
-/// MVP trust assumptions (documented, removed in later phases):
+/// Trust assumptions, stated so they can be checked:
 ///  - Makers are allowlisted by the owner, so the set is permissioned even
 ///    though the accounting is not.
-///  - A maker's signer prices that maker's own risk. It can only set premiums,
-///    never move collateral or another maker's inventory.
-///  - After `fallbackDelay` past expiry the owner may settle with a manual
-///    price, as an oracle-outage escape hatch.
+///  - A maker's signer prices that maker's own risk. Only the maker can rotate
+///    it, and the maker can cap the premium any quote may pay per BTC, which
+///    bounds what a leaked signing key could give away.
+///  - Changing the oracle is announced on-chain and takes effect only after
+///    ORACLE_DELAY, so nobody can swap the price source under open positions.
+///  - After `fallbackDelay` (at least a day) past expiry the owner may settle
+///    with a manual price, as an oracle-outage escape hatch.
 contract WritOptions is EIP712, Ownable, Pausable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -78,7 +83,7 @@ contract WritOptions is EIP712, Ownable, Pausable, ReentrancyGuard {
         PositionState state;
     }
 
-    /// @notice A desk quote authorizing one option write, EIP-712 signed by `quoteSigner`.
+    /// @notice A maker's offer for one option write, EIP-712 signed by that maker's signer.
     struct Quote {
         address writer;
         address maker;
@@ -111,15 +116,27 @@ contract WritOptions is EIP712, Ownable, Pausable, ReentrancyGuard {
         uint128 btcFree;
         uint128 btcReserved;
         bool active;
+        /// @dev Most premium (USDC 1e6) this maker pays per 1 BTC of size; 0 means
+        /// no cap. Set by the maker, so a leaked signer cannot lift it.
+        uint128 maxPremiumPerBtc;
     }
 
     mapping(address => MakerAccount) public makers;
 
+    /// @notice How long a proposed oracle waits before it can take over.
+    uint64 public constant ORACLE_DELAY = 1 days;
+    /// @notice The manual settlement hatch can never open sooner than this.
+    uint64 public constant MIN_FALLBACK_DELAY = 1 days;
+
+    IOracleAdapter public pendingOracle;
+    uint64 public pendingOracleReadyAt;
+
     uint64 public minTenor = 20 minutes;
     uint64 public maxTenor = 30 days;
     uint64 public fallbackDelay = 3 days;
-    /// @dev Both products are sized by their cash leg, so one pair of caps covers
+    /// @dev Both products are sized by their cash leg, so one set of caps covers
     /// them and the numbers stay comparable between them.
+    uint128 public minPositionNotional = 10e6;
     uint128 public maxPositionNotional = 100_000e6;
     uint128 public maxTotalNotional = 1_000_000e6;
 
@@ -141,13 +158,15 @@ contract WritOptions is EIP712, Ownable, Pausable, ReentrancyGuard {
     uint256 public nextPositionId = 1;
     mapping(uint256 => Position) private _positions;
     mapping(address => uint256[]) private _writerPositionIds;
-    mapping(uint256 => bool) public usedNonces;
+    /// @dev Scoped per maker, so one maker can never burn another's quote nonce.
+    mapping(address => mapping(uint256 => bool)) public usedNonces;
 
     // ---------------------------------------------------------------- events
 
     event MakerRegistered(address indexed maker, address indexed signer);
     event MakerSignerUpdated(address indexed maker, address indexed signer);
     event MakerActiveUpdated(address indexed maker, bool active);
+    event MakerPremiumCapUpdated(address indexed maker, uint128 maxPremiumPerBtc);
     event MakerDeposited(address indexed maker, bool isUsdc, uint256 amount);
     event MakerWithdrawn(address indexed maker, address indexed to, bool isUsdc, uint256 amount);
     event OptionWritten(
@@ -169,11 +188,14 @@ contract WritOptions is EIP712, Ownable, Pausable, ReentrancyGuard {
         uint128 intrinsicUsdc,
         bool viaFallback
     );
+    event OracleProposed(address indexed oracle, uint64 readyAt);
+    event OracleProposalCancelled(address indexed oracle);
     event OracleUpdated(address indexed oracle);
     event RiskParamsUpdated(
         uint64 minTenor,
         uint64 maxTenor,
         uint64 fallbackDelay,
+        uint128 minPositionNotional,
         uint128 maxPositionNotional,
         uint128 maxTotalNotional
     );
@@ -191,23 +213,34 @@ contract WritOptions is EIP712, Ownable, Pausable, ReentrancyGuard {
     error MakerAlreadyRegistered();
     error NotMaker();
     error InvalidPremium();
+    error PremiumAboveMakerCap();
+    error PositionTooSmall();
     error PositionTooLarge();
     error ProtocolCapReached();
-    error InsufficientDeskLiquidity();
-    error InsufficientDeskInventory();
+    error InsufficientMakerLiquidity();
+    error InsufficientMakerInventory();
     error PositionNotOpen();
     error NotYetExpired();
     error FallbackTooEarly();
     error InvalidRiskParams();
+    error UnsupportedToken();
+    error NoPendingOracle();
+    error OracleNotReady();
 
     // ---------------------------------------------------------------- setup
 
     constructor(address usdc_, address btc_, address oracle_)
-        EIP712("WritOptions", "1")
+        EIP712("WritOptions", "2")
         Ownable(msg.sender)
     {
         if (usdc_ == address(0) || btc_ == address(0) || oracle_ == address(0)) {
             revert ZeroAddress();
+        }
+        // Every amount in this contract assumes 6-decimal cash and an 8-decimal
+        // underlying. An 18-decimal token would misprice by 1e10 silently, so
+        // refuse it at deployment instead.
+        if (IERC20Metadata(usdc_).decimals() != 6 || IERC20Metadata(btc_).decimals() != 8) {
+            revert UnsupportedToken();
         }
         usdc = IERC20(usdc_);
         btc = IERC20(btc_);
@@ -216,9 +249,9 @@ contract WritOptions is EIP712, Ownable, Pausable, ReentrancyGuard {
 
     // ---------------------------------------------------------------- write
 
-    /// @notice Execute a desk-signed quote: lock collateral, receive the premium instantly.
-    /// @param q The quote exactly as signed by the desk quote signer.
-    /// @param signature EIP-712 signature over `q` by `quoteSigner`.
+    /// @notice Execute a maker's signed quote: lock collateral, receive the premium instantly.
+    /// @param q The quote exactly as the maker's signer signed it.
+    /// @param signature EIP-712 signature over `q` by `makers[q.maker].signer`.
     function writeOption(Quote calldata q, bytes calldata signature)
         external
         nonReentrant
@@ -227,7 +260,7 @@ contract WritOptions is EIP712, Ownable, Pausable, ReentrancyGuard {
     {
         if (q.writer != msg.sender) revert NotQuoteWriter();
         if (block.timestamp > q.quoteDeadline) revert QuoteExpired();
-        if (usedNonces[q.nonce]) revert NonceAlreadyUsed();
+        if (usedNonces[q.maker][q.nonce]) revert NonceAlreadyUsed();
         if (q.qty == 0 || q.strike == 0) revert InvalidOptionParams();
         if (q.expiry < block.timestamp + minTenor || q.expiry > block.timestamp + maxTenor) {
             revert ExpiryOutOfRange();
@@ -240,11 +273,17 @@ contract WritOptions is EIP712, Ownable, Pausable, ReentrancyGuard {
 
         uint128 notional = OptionMath.notionalUsdc(q.strike, q.qty);
         if (q.premium == 0 || q.premium >= notional) revert InvalidPremium();
+        // premium / (qty / 1e8) > cap, without dividing.
+        if (
+            m.maxPremiumPerBtc != 0
+                && uint256(q.premium) * 1e8 > uint256(m.maxPremiumPerBtc) * q.qty
+        ) revert PremiumAboveMakerCap();
+        if (notional < minPositionNotional) revert PositionTooSmall();
         if (notional > maxPositionNotional) revert PositionTooLarge();
         if (totalOpenNotional + notional > maxTotalNotional) revert ProtocolCapReached();
-        if (m.usdcFree < q.premium) revert InsufficientDeskLiquidity();
+        if (m.usdcFree < q.premium) revert InsufficientMakerLiquidity();
 
-        usedNonces[q.nonce] = true;
+        usedNonces[q.maker][q.nonce] = true;
         m.usdcFree -= q.premium;
         makerUsdcFree -= q.premium;
         totalOpenNotional += notional;
@@ -274,14 +313,14 @@ contract WritOptions is EIP712, Ownable, Pausable, ReentrancyGuard {
         );
     }
 
-    /// @dev Pull the writer's collateral in and reserve the side the desk may owe.
+    /// @dev Pull the writer's collateral in and reserve the side the maker may owe.
     /// Split out of `writeOption` to keep the stack flat.
     function _openLegs(Quote calldata q, uint128 notional) internal returns (uint128 collateral) {
         MakerAccount storage m = makers[q.maker];
         if (q.isPut) {
             // Writer posts cash; the maker may have to deliver the underlying.
             collateral = notional;
-            if (m.btcFree < q.qty) revert InsufficientDeskInventory();
+            if (m.btcFree < q.qty) revert InsufficientMakerInventory();
             m.btcFree -= q.qty;
             m.btcReserved += q.qty;
             makerBtcFree -= q.qty;
@@ -291,7 +330,7 @@ contract WritOptions is EIP712, Ownable, Pausable, ReentrancyGuard {
         } else {
             // Writer posts the underlying; the maker may have to pay the strike.
             collateral = q.qty;
-            if (m.usdcFree < notional) revert InsufficientDeskInventory();
+            if (m.usdcFree < notional) revert InsufficientMakerLiquidity();
             m.usdcFree -= notional;
             m.usdcReserved += notional;
             makerUsdcFree -= notional;
@@ -409,14 +448,23 @@ contract WritOptions is EIP712, Ownable, Pausable, ReentrancyGuard {
         emit MakerActiveUpdated(maker, true);
     }
 
-    /// @notice Rotate a maker's signing key. The maker may do this itself, so a
-    /// compromised quoting key does not need the owner to be awake.
-    function setMakerSigner(address maker, address signer) external {
-        if (msg.sender != maker && msg.sender != owner()) revert NotMaker();
+    /// @notice Rotate your own signing key. Only the maker can: whoever controls
+    /// the signer controls what the maker's balance pays out, so not even the
+    /// owner may point it elsewhere. The owner's lever is `setMakerActive`.
+    function setMakerSigner(address signer) external {
+        if (makers[msg.sender].signer == address(0)) revert NotMaker();
         if (signer == address(0)) revert ZeroAddress();
-        if (makers[maker].signer == address(0)) revert MakerNotActive();
-        makers[maker].signer = signer;
-        emit MakerSignerUpdated(maker, signer);
+        makers[msg.sender].signer = signer;
+        emit MakerSignerUpdated(msg.sender, signer);
+    }
+
+    /// @notice Cap the premium your quotes may pay, in USDC per 1 BTC of size.
+    /// @dev Defence in depth for a hot signing key: whatever a leaked signer
+    /// signs, no single write can take more than this per BTC. 0 removes it.
+    function setMakerPremiumCap(uint128 maxPremiumPerBtc) external {
+        if (makers[msg.sender].signer == address(0)) revert NotMaker();
+        makers[msg.sender].maxPremiumPerBtc = maxPremiumPerBtc;
+        emit MakerPremiumCapUpdated(msg.sender, maxPremiumPerBtc);
     }
 
     /// @notice Stop or resume a maker quoting. Open positions are unaffected:
@@ -431,7 +479,8 @@ contract WritOptions is EIP712, Ownable, Pausable, ReentrancyGuard {
     function depositMakerUsdc(uint256 amount) external {
         MakerAccount storage m = makers[msg.sender];
         if (m.signer == address(0)) revert NotMaker();
-        m.usdcFree += uint128(amount);
+        // Checked: an amount past uint128 would split the book from the totals.
+        m.usdcFree += SafeCast.toUint128(amount);
         makerUsdcFree += amount;
         usdc.safeTransferFrom(msg.sender, address(this), amount);
         emit MakerDeposited(msg.sender, true, amount);
@@ -440,7 +489,7 @@ contract WritOptions is EIP712, Ownable, Pausable, ReentrancyGuard {
     function depositMakerBtc(uint256 amount) external {
         MakerAccount storage m = makers[msg.sender];
         if (m.signer == address(0)) revert NotMaker();
-        m.btcFree += uint128(amount);
+        m.btcFree += SafeCast.toUint128(amount);
         makerBtcFree += amount;
         btc.safeTransferFrom(msg.sender, address(this), amount);
         emit MakerDeposited(msg.sender, false, amount);
@@ -452,7 +501,7 @@ contract WritOptions is EIP712, Ownable, Pausable, ReentrancyGuard {
         MakerAccount storage m = makers[msg.sender];
         if (m.signer == address(0)) revert NotMaker();
         if (to == address(0)) revert ZeroAddress();
-        if (amount > m.usdcFree) revert InsufficientDeskLiquidity();
+        if (amount > m.usdcFree) revert InsufficientMakerLiquidity();
         m.usdcFree -= uint128(amount);
         makerUsdcFree -= amount;
         usdc.safeTransfer(to, amount);
@@ -463,7 +512,7 @@ contract WritOptions is EIP712, Ownable, Pausable, ReentrancyGuard {
         MakerAccount storage m = makers[msg.sender];
         if (m.signer == address(0)) revert NotMaker();
         if (to == address(0)) revert ZeroAddress();
-        if (amount > m.btcFree) revert InsufficientDeskInventory();
+        if (amount > m.btcFree) revert InsufficientMakerInventory();
         m.btcFree -= uint128(amount);
         makerBtcFree -= amount;
         btc.safeTransfer(to, amount);
@@ -472,30 +521,59 @@ contract WritOptions is EIP712, Ownable, Pausable, ReentrancyGuard {
 
     // ---------------------------------------------------------------- admin
 
-    function setOracle(address oracle_) external onlyOwner {
+    /// @notice Announce a new oracle. It can take over after ORACLE_DELAY, which
+    /// gives everyone with an open position a day to see the change coming.
+    function proposeOracle(address oracle_) external onlyOwner {
         if (oracle_ == address(0)) revert ZeroAddress();
-        oracle = IOracleAdapter(oracle_);
-        emit OracleUpdated(oracle_);
+        pendingOracle = IOracleAdapter(oracle_);
+        pendingOracleReadyAt = uint64(block.timestamp) + ORACLE_DELAY;
+        emit OracleProposed(oracle_, pendingOracleReadyAt);
+    }
+
+    function acceptOracle() external onlyOwner {
+        address next = address(pendingOracle);
+        if (next == address(0)) revert NoPendingOracle();
+        if (block.timestamp < pendingOracleReadyAt) revert OracleNotReady();
+        oracle = pendingOracle;
+        delete pendingOracle;
+        delete pendingOracleReadyAt;
+        emit OracleUpdated(next);
+    }
+
+    function cancelOracle() external onlyOwner {
+        address next = address(pendingOracle);
+        if (next == address(0)) revert NoPendingOracle();
+        delete pendingOracle;
+        delete pendingOracleReadyAt;
+        emit OracleProposalCancelled(next);
     }
 
     function setRiskParams(
         uint64 minTenor_,
         uint64 maxTenor_,
         uint64 fallbackDelay_,
+        uint128 minPositionNotional_,
         uint128 maxPositionNotional_,
         uint128 maxTotalNotional_
     ) external onlyOwner {
         if (
-            minTenor_ == 0 || minTenor_ >= maxTenor_ || fallbackDelay_ == 0
-                || maxPositionNotional_ == 0 || maxPositionNotional_ > maxTotalNotional_
+            minTenor_ == 0 || minTenor_ >= maxTenor_ || fallbackDelay_ < MIN_FALLBACK_DELAY
+                || minPositionNotional_ == 0 || minPositionNotional_ > maxPositionNotional_
+                || maxPositionNotional_ > maxTotalNotional_
         ) revert InvalidRiskParams();
         minTenor = minTenor_;
         maxTenor = maxTenor_;
         fallbackDelay = fallbackDelay_;
+        minPositionNotional = minPositionNotional_;
         maxPositionNotional = maxPositionNotional_;
         maxTotalNotional = maxTotalNotional_;
         emit RiskParamsUpdated(
-            minTenor_, maxTenor_, fallbackDelay_, maxPositionNotional_, maxTotalNotional_
+            minTenor_,
+            maxTenor_,
+            fallbackDelay_,
+            minPositionNotional_,
+            maxPositionNotional_,
+            maxTotalNotional_
         );
     }
 
@@ -547,17 +625,20 @@ contract WritOptions is EIP712, Ownable, Pausable, ReentrancyGuard {
         return isPut ? OptionMath.notionalUsdc(strike, qty) : qty;
     }
 
-    /// @notice How many more of this option one maker can currently back.
-    /// @dev The binding limit is inventory on the side that maker may have to
-    /// deliver, which is what the UI should show as remaining capacity.
-    function makerCapacity(address maker, bool isPut, uint64 strike, uint64 qty)
+    /// @notice Positions `fromId` .. `fromId + count - 1` that exist, in order.
+    /// @dev Lets a keeper or a UI read a page of the book in one call.
+    function getPositions(uint256 fromId, uint256 count)
         external
         view
-        returns (uint256 positions)
+        returns (Position[] memory page)
     {
-        if (qty == 0 || strike == 0) return 0;
-        MakerAccount storage m = makers[maker];
-        if (!m.active) return 0;
-        return isPut ? m.btcFree / qty : m.usdcFree / OptionMath.notionalUsdc(strike, qty);
+        if (fromId == 0) fromId = 1;
+        uint256 end = fromId + count;
+        if (end > nextPositionId) end = nextPositionId;
+        if (fromId >= end) return new Position[](0);
+        page = new Position[](end - fromId);
+        for (uint256 i; i < page.length; ++i) {
+            page[i] = _positions[fromId + i];
+        }
     }
 }

@@ -172,21 +172,21 @@ contract WritOptionsTest is Test {
         _assertSolvent();
     }
 
-    function test_WritePut_RevertWhen_DeskCannotDeliverUnderlying() public {
+    function test_WritePut_RevertWhen_MakerCannotDeliverUnderlying() public {
         core.withdrawMakerBtc(address(this), core.makerBtcFree());
         WritOptions.Quote memory q = _putQuote();
         bytes memory sig = _sign(q);
         vm.prank(writer);
-        vm.expectRevert(WritOptions.InsufficientDeskInventory.selector);
+        vm.expectRevert(WritOptions.InsufficientMakerInventory.selector);
         core.writeOption(q, sig);
     }
 
-    function test_WriteCall_RevertWhen_DeskCannotPayStrike() public {
+    function test_WriteCall_RevertWhen_MakerCannotPayStrike() public {
         core.withdrawMakerUsdc(address(this), core.makerUsdcFree() - 100e6);
         WritOptions.Quote memory q = _callQuote();
         bytes memory sig = _sign(q);
         vm.prank(writer);
-        vm.expectRevert(WritOptions.InsufficientDeskInventory.selector);
+        vm.expectRevert(WritOptions.InsufficientMakerLiquidity.selector);
         core.writeOption(q, sig);
     }
 
@@ -278,7 +278,7 @@ contract WritOptionsTest is Test {
     }
 
     function test_Write_RevertWhen_PositionTooLarge() public {
-        core.setRiskParams(20 minutes, 30 days, 3 days, 1_000e6, 1_000_000e6);
+        core.setRiskParams(20 minutes, 30 days, 3 days, 10e6, 1_000e6, 1_000_000e6);
         WritOptions.Quote memory q = _putQuote();
         bytes memory sig = _sign(q);
         vm.prank(writer);
@@ -287,7 +287,7 @@ contract WritOptionsTest is Test {
     }
 
     function test_Write_RevertWhen_ProtocolCapReached() public {
-        core.setRiskParams(20 minutes, 30 days, 3 days, 10_000e6, 10_000e6);
+        core.setRiskParams(20 minutes, 30 days, 3 days, 10e6, 10_000e6, 10_000e6);
         _write(_putQuote());
         WritOptions.Quote memory q = _putQuote();
         bytes memory sig = _sign(q);
@@ -459,7 +459,7 @@ contract WritOptionsTest is Test {
 
     // ------------------------------------------------------------- desk
 
-    function test_WithdrawDesk_CannotTouchReservesOrCollateral() public {
+    function test_WithdrawMaker_CannotTouchReservesOrCollateral() public {
         _write(_putQuote()); // reserves 0.1 BTC, locks 6,500 USDC of writer cash
 
         core.withdrawMakerUsdc(address(this), core.makerUsdcFree());
@@ -472,23 +472,30 @@ contract WritOptionsTest is Test {
         _assertSolvent();
     }
 
-    function test_WithdrawDesk_RevertWhen_ExceedsFree() public {
+    function test_WithdrawMaker_RevertWhen_ExceedsFree() public {
         // Read the balances first: expectRevert arms the very next call, and a
         // view read inside the argument list would be the one it catches.
         uint256 tooMuchUsdc = core.makerUsdcFree() + 1;
         uint256 tooMuchBtc = core.makerBtcFree() + 1;
 
-        vm.expectRevert(WritOptions.InsufficientDeskLiquidity.selector);
+        vm.expectRevert(WritOptions.InsufficientMakerLiquidity.selector);
         core.withdrawMakerUsdc(address(this), tooMuchUsdc);
-        vm.expectRevert(WritOptions.InsufficientDeskInventory.selector);
+        vm.expectRevert(WritOptions.InsufficientMakerInventory.selector);
         core.withdrawMakerBtc(address(this), tooMuchBtc);
     }
 
-    function test_MakerCapacity_TracksTheDeliverableSide() public view {
-        // A put is limited by underlying the maker can deliver.
-        assertEq(core.makerCapacity(address(this), true, 65_000e8, 1e7), 50e8 / 1e7);
-        // A covered call is limited by cash the maker can pay.
-        assertEq(core.makerCapacity(address(this), false, 65_000e8, 1e7), uint256(200_000e6) / 6_500e6);
+    function test_GetPositions_ReadsAPageOfTheBook() public {
+        _write(_putQuote());
+        _write(_callQuote());
+        _write(_putQuote());
+
+        WritOptions.Position[] memory page = core.getPositions(2, 10);
+        assertEq(page.length, 2, "stops at the last position");
+        assertFalse(page[0].isPut);
+        assertTrue(page[1].isPut);
+
+        assertEq(core.getPositions(0, 1).length, 1, "id 0 reads from the first position");
+        assertEq(core.getPositions(4, 5).length, 0, "past the end is empty");
     }
 
     // ------------------------------------------------------------- makers
@@ -544,8 +551,8 @@ contract WritOptionsTest is Test {
         (address makerB, uint256 pkB) = _secondMaker();
         _writeAgainst(makerB, pkB, true); // reserves 0.1 BTC of B's inventory
 
-        (, , , uint128 btcFreeB, uint128 btcReservedB,) = core.makers(makerB);
-        (, , , uint128 btcFreeA, uint128 btcReservedA,) = core.makers(address(this));
+        (, , , uint128 btcFreeB, uint128 btcReservedB, ,) = core.makers(makerB);
+        (, , , uint128 btcFreeA, uint128 btcReservedA, ,) = core.makers(address(this));
 
         assertEq(btcReservedB, 1e7, "B backs its own position");
         assertEq(btcReservedA, 0, "A is untouched by B's trade");
@@ -572,7 +579,7 @@ contract WritOptionsTest is Test {
 
         // B may take out only what is still free on its own book.
         vm.prank(makerB);
-        vm.expectRevert(WritOptions.InsufficientDeskLiquidity.selector);
+        vm.expectRevert(WritOptions.InsufficientMakerLiquidity.selector);
         core.withdrawMakerUsdc(makerB, 100_000e6);
 
         vm.prank(makerB);
@@ -592,7 +599,7 @@ contract WritOptionsTest is Test {
 
     function test_Makers_SignerRotation() public {
         uint256 newPk = 0xFEED;
-        core.setMakerSigner(address(this), vm.addr(newPk));
+        core.setMakerSigner(vm.addr(newPk));
 
         // The old key stops working immediately.
         WritOptions.Quote memory q = _putQuote();
@@ -622,6 +629,123 @@ contract WritOptionsTest is Test {
         _assertSolvent();
         assertEq(core.makerUsdcReserved(), 0);
         assertEq(core.makerBtcReserved(), 0);
+    }
+
+    function test_Makers_OwnerCannotRotateAnotherMakersSigner() public {
+        (address makerB,) = _secondMaker();
+        // The owner can pause a maker, but never redirect what its balance pays:
+        // setMakerSigner acts on the caller's own book only.
+        core.setMakerSigner(makeAddr("owner-key"));
+        (address signerB, , , , , ,) = core.makers(makerB);
+        assertEq(signerB, vm.addr(MAKER_B_PK), "B's signer is untouched");
+
+        vm.prank(makeAddr("stranger"));
+        vm.expectRevert(WritOptions.NotMaker.selector);
+        core.setMakerSigner(makeAddr("x"));
+    }
+
+    function test_Makers_NoncesArePerMaker() public {
+        (address makerB, uint256 pkB) = _secondMaker();
+        WritOptions.Quote memory a = _putQuote();
+        _write(a);
+
+        // Maker B may use the same nonce: one maker cannot burn another's quotes.
+        WritOptions.Quote memory b = _putQuote();
+        b.nonce = a.nonce;
+        b.maker = makerB;
+        (uint8 v, bytes32 r, bytes32 sg) = vm.sign(pkB, core.hashQuote(b));
+        vm.prank(writer);
+        core.writeOption(b, abi.encodePacked(r, sg, v));
+
+        assertTrue(core.usedNonces(address(this), a.nonce));
+        assertTrue(core.usedNonces(makerB, a.nonce));
+    }
+
+    function test_Makers_PremiumCapBoundsALeakedSigner() public {
+        // 1,000 USDC per BTC: the 0.1 BTC put may pay at most 100 USDC.
+        core.setMakerPremiumCap(1_000e6);
+
+        WritOptions.Quote memory q = _putQuote(); // 120 USDC premium
+        bytes memory sig = _sign(q);
+        vm.prank(writer);
+        vm.expectRevert(WritOptions.PremiumAboveMakerCap.selector);
+        core.writeOption(q, sig);
+
+        q.premium = 100e6; // exactly at the cap
+        _write(q);
+
+        // The absurd-strike call a stolen key would sign: a tiny size with a
+        // huge strike inflates the notional, but not the size the cap is on.
+        WritOptions.Quote memory c = _callQuote();
+        c.qty = 1e4; // 0.0001 BTC
+        c.strike = 10_000_000e8;
+        c.premium = 500e6;
+        sig = _sign(c);
+        vm.prank(writer);
+        vm.expectRevert(WritOptions.PremiumAboveMakerCap.selector);
+        core.writeOption(c, sig);
+    }
+
+    function test_Write_RevertWhen_PositionTooSmall() public {
+        WritOptions.Quote memory q = _putQuote();
+        q.qty = 1_000; // 0.00001 BTC at 65,000 = 0.65 USDC, under the 10 USDC floor
+        q.premium = 1e4;
+        bytes memory sig = _sign(q);
+        vm.prank(writer);
+        vm.expectRevert(WritOptions.PositionTooSmall.selector);
+        core.writeOption(q, sig);
+    }
+
+    function test_Constructor_RevertWhen_TokenDecimalsWrong() public {
+        MockUSDC eighteen = new MockUSDC();
+        vm.mockCall(address(eighteen), abi.encodeWithSignature("decimals()"), abi.encode(uint8(18)));
+        vm.expectRevert(WritOptions.UnsupportedToken.selector);
+        new WritOptions(address(eighteen), address(btc), address(adapter));
+        vm.expectRevert(WritOptions.UnsupportedToken.selector);
+        new WritOptions(address(usdc), address(usdc), address(adapter));
+    }
+
+    // ------------------------------------------------------------- admin
+
+    function test_Oracle_ChangeIsTimeLocked() public {
+        address next = makeAddr("next-oracle");
+        core.proposeOracle(next);
+        assertEq(address(core.pendingOracle()), next);
+
+        vm.expectRevert(WritOptions.OracleNotReady.selector);
+        core.acceptOracle();
+
+        vm.warp(block.timestamp + core.ORACLE_DELAY());
+        core.acceptOracle();
+        assertEq(address(core.oracle()), next);
+        assertEq(address(core.pendingOracle()), address(0));
+
+        vm.expectRevert(WritOptions.NoPendingOracle.selector);
+        core.acceptOracle();
+    }
+
+    function test_Oracle_ProposalCanBeCancelled() public {
+        core.proposeOracle(makeAddr("next-oracle"));
+        core.cancelOracle();
+        vm.warp(block.timestamp + 2 days);
+        vm.expectRevert(WritOptions.NoPendingOracle.selector);
+        core.acceptOracle();
+        assertEq(address(core.oracle()), address(adapter));
+    }
+
+    function test_Oracle_OnlyOwner() public {
+        vm.prank(writer);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, writer));
+        core.proposeOracle(makeAddr("next-oracle"));
+    }
+
+    function test_RiskParams_FallbackCanNeverBeInstant() public {
+        vm.expectRevert(WritOptions.InvalidRiskParams.selector);
+        core.setRiskParams(20 minutes, 30 days, 1 hours, 10e6, 100_000e6, 1_000_000e6);
+        vm.expectRevert(WritOptions.InvalidRiskParams.selector);
+        core.setRiskParams(20 minutes, 30 days, 1 days, 0, 100_000e6, 1_000_000e6);
+        core.setRiskParams(20 minutes, 30 days, 1 days, 10e6, 100_000e6, 1_000_000e6);
+        assertEq(core.fallbackDelay(), 1 days);
     }
 
     // ------------------------------------------------------------- fuzz

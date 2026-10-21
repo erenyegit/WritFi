@@ -12,9 +12,14 @@ import {IPyth, PythStructs} from "../interfaces/IPyth.sol";
 /// Settlement reads the *unique first* Pyth update whose publishTime falls in
 /// [expiry, expiry + settlementWindow]. "Unique first" is enforced by Pyth
 /// itself (the update's prevPublishTime must be before the window), so a
-/// settler cannot cherry-pick a favorable tick inside the window. Historical
-/// payloads are served forever by Hermes benchmarks, so settlement can be
-/// triggered any time after expiry.
+/// settler cannot cherry-pick a favorable tick inside the window.
+///
+/// Use this adapter only where the Pyth contract accepts current updates
+/// (version 1.4.6 or later). Two limits apply to late settlement: Hermes keeps
+/// historical updates for about two months, and an update stops verifying once
+/// the guardian set that signed it expires. Settle promptly after expiry.
+/// On GIWA Sepolia, whose Pyth deployment was not upgraded, use
+/// PythAccumulatorAdapter instead.
 contract PythAdapter is IOracleAdapter, Ownable {
     IPyth public immutable pyth;
     bytes32 public immutable priceFeedId;
