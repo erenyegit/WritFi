@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { clearXAuth, readXAuth, sessionAddress } from "@/lib/early/session";
+import { clearXAuth, publicOrigin, readXAuth, sessionAddress } from "@/lib/early/session";
 import { linkX, XLinkError } from "@/lib/early/store";
 import { profileFromCode, redirectUri } from "@/lib/early/xoauth";
 
@@ -13,8 +13,9 @@ export const dynamic = "force-dynamic";
  * shows the outcome from ?x=.
  */
 export async function GET(req: NextRequest) {
+  const origin = publicOrigin(req);
   const finish = (x: string) => {
-    const res = NextResponse.redirect(new URL(`/early?x=${x}#steps`, req.url), 303);
+    const res = NextResponse.redirect(new URL(`/early?x=${x}#steps`, origin), 303);
     clearXAuth(res);
     return res;
   };
@@ -27,7 +28,7 @@ export async function GET(req: NextRequest) {
   if (!code) return finish("failed");
 
   try {
-    const profile = await profileFromCode(code, pending.verifier, redirectUri(req.nextUrl.origin));
+    const profile = await profileFromCode(code, pending.verifier, redirectUri(origin));
     const referral = await linkX(pending.address, profile);
     return finish(referral === "too_new" ? "young" : "connected");
   } catch (err) {

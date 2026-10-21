@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { isCode } from "@/lib/early/quests";
-import { readRef, rememberRef } from "@/lib/early/session";
+import { publicOrigin, readRef, rememberRef } from "@/lib/early/session";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +14,7 @@ export function GET(req: NextRequest, { params }: { params: { code: string } }) 
   const kept = readRef(req)?.toUpperCase() ?? "";
   const code = isCode(kept) ? kept : params.code.toUpperCase();
   const valid = isCode(code);
-  const to = new URL("/early", req.url);
+  const to = new URL("/early", publicOrigin(req));
   if (valid) to.searchParams.set("ref", code);
   const res = NextResponse.redirect(to, 307);
   if (valid && code !== kept) rememberRef(res, code);

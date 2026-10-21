@@ -140,6 +140,18 @@ export function sameOrigin(req: NextRequest) {
   }
 }
 
+/**
+ * The origin the visitor is on, for building redirects. Behind the server's
+ * proxy, req.url carries the address Next listens on (http://0.0.0.0:3000),
+ * so the origin comes from the Host the proxy passes through.
+ */
+export function publicOrigin(req: NextRequest) {
+  const host = req.headers.get("host");
+  if (!host) return req.nextUrl.origin;
+  const proto = req.headers.get("x-forwarded-proto")?.split(",")[0].trim() || req.nextUrl.protocol.slice(0, -1);
+  return `${proto}://${host}`;
+}
+
 /** Bearer token for the full export. */
 export function isAdmin(req: NextRequest) {
   const token = process.env.EARLY_ADMIN_TOKEN;
