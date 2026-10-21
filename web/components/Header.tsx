@@ -1,119 +1,116 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
-import { useAccount, useConnect, useDisconnect, useSwitchChain } from "wagmi";
+import { useEffect, useState } from "react";
 
-import { giwaSepolia } from "@/lib/chain";
-import { LogoMark } from "@/components/Logo";
-import { shortAddr } from "@/lib/format";
+import { MarkGlyph } from "@/components/Logo";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
-const nav = [
-  { href: "/", label: "earn" },
-  { href: "/trade", label: "trade" },
-  { href: "/positions", label: "positions" },
-];
+import { TestFunds, TestFundsPanel } from "./TestFunds";
+import { WalletButton } from "./WalletButton";
 
-export function Header() {
+/**
+ * The name in the middle, the sections on the left, the wallet on the right,
+ * and nothing else. A section that is not open yet is set in grey; its page
+ * says "Coming soon". Below lg the sections fold into a menu.
+ *
+ * `soon`: pre-launch, when only early access is open and the desk pages say "Coming soon".
+ */
+export function Header({ homeHref, soon = false }: { homeHref: string; soon?: boolean }) {
   const pathname = usePathname();
-  const { address, chainId, isConnected } = useAccount();
-  const { connect, connectors, isPending } = useConnect();
-  const { disconnect } = useDisconnect();
-  const { switchChain } = useSwitchChain();
+  const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => setMenuOpen(false), [pathname]);
 
-  const wrongChain = isConnected && chainId !== giwaSepolia.id;
-
-  // wagmi discovers every EIP-6963 wallet in the browser as its own connector.
-  // Picking connectors[0] silently locked out anyone whose wallet was not first.
-  const [picking, setPicking] = useState(false);
-  const pickerRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!picking) return;
-    const close = (e: MouseEvent) => {
-      if (!pickerRef.current?.contains(e.target as Node)) setPicking(false);
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [picking]);
-
-  const onConnect = () => {
-    if (connectors.length === 1) connect({ connector: connectors[0] });
-    else setPicking((v) => !v);
-  };
+  const desk = [
+    { href: "/earn", label: "Earn", soon },
+    { href: "/positions", label: "Portfolio", soon },
+  ];
+  const early = { href: "/early", label: "Early access", soon: false };
+  const nav = [
+    // Pre-launch, the one open part of the site leads.
+    ...(soon ? [early, ...desk] : [...desk, early]),
+    // While the splash holds "/", the explainer is not reachable; skip the link.
+    ...(homeHref === "/" ? [{ href: "/#how", label: "How it works", soon: false }] : []),
+  ];
+  const active = (href: string) =>
+    href.startsWith("/#") ? false : pathname === href || pathname.startsWith(`${href}/`);
+  const tone = (n: (typeof nav)[number]) =>
+    active(n.href) ? "text-ink" : n.soon ? "text-ink-300 hover:text-ink-500" : "text-ink-500 hover:text-ink";
 
   return (
-    <header className="sticky top-0 z-20 border-b border-inkline bg-ink-900/95 backdrop-blur">
-      <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-4">
-        <div className="flex items-center gap-10">
-          <Link href="/" className="flex items-center gap-2.5" aria-label="Writ Fi home">
-            <LogoMark size={36} />
-            <span className="font-display text-[22px] font-bold tracking-tight text-char">
-              Writ
-            </span>
-          </Link>
-          <nav className="hidden items-center gap-1.5 sm:flex">
+    <header className="sticky top-0 z-30 border-b border-paper-line bg-paper">
+      <div className="mx-auto grid h-16 max-w-page grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-5 sm:px-8 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] lg:gap-8">
+        <nav className="hidden items-center gap-8 lg:flex" aria-label="Sections">
+          {nav.map((n) => (
+            <Link
+              key={n.href}
+              href={n.href}
+              aria-current={active(n.href) ? "page" : undefined}
+              title={n.soon ? "Coming soon" : undefined}
+              className={`whitespace-nowrap text-[14.5px] transition-colors ${tone(n)}`}
+            >
+              {n.label}
+            </Link>
+          ))}
+        </nav>
+
+        <Link
+          href={homeHref}
+          className="flex items-center gap-2 justify-self-start text-ink lg:justify-self-center"
+          aria-label="Writ Fi home"
+        >
+          <MarkGlyph className="h-[15px] w-auto text-brand" />
+          <span className="font-serif text-[21px] font-medium leading-none tracking-[-0.01em]">Writ Fi</span>
+        </Link>
+
+        <div className="flex items-center justify-end gap-2">
+          <ThemeToggle />
+          {!soon && <TestFunds className="hidden sm:inline-flex" />}
+          {/* Pre-launch, connecting is only for early access sign-in, which works on any chain. */}
+          <WalletButton
+            requireGiwa={!soon}
+            connectClassName="btn btn-sm border border-ink/80 bg-transparent text-ink hover:bg-ink hover:text-paper"
+          />
+          <button
+            className="btn-quiet btn-sm w-10 px-0 lg:hidden"
+            aria-label={menuOpen ? "Close menu" : "Open menu"}
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            <svg viewBox="0 0 20 20" className="h-4 w-4" aria-hidden="true">
+              {menuOpen ? (
+                <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              ) : (
+                <path d="M3 6h14M3 10h14M3 14h14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              )}
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {menuOpen && (
+        <div className="border-t border-paper-line bg-paper-sheet lg:hidden">
+          <nav className="mx-auto max-w-page px-5 py-2 sm:px-8" aria-label="Sections">
             {nav.map((n) => (
               <Link
                 key={n.href}
                 href={n.href}
-                className={`rounded-full px-3.5 py-1.5 font-mono text-[12px] tracking-wider transition ${
-                  pathname === n.href
-                    ? "bg-ink-800 font-semibold text-char"
-                    : "text-steel-400 hover:bg-ink-850 hover:text-char"
-                }`}
+                aria-current={active(n.href) ? "page" : undefined}
+                className={`flex items-center justify-between border-b border-paper-line py-3.5 text-[16px] last:border-b-0 ${tone(n)}`}
               >
                 {n.label}
+                {n.soon && <span className="text-[13px] text-ink-300">Coming soon</span>}
               </Link>
             ))}
           </nav>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <span className="hidden items-center gap-2 rounded-md border border-hairline px-2.5 py-1.5 md:inline-flex">
-            <span className="dot bg-yield" />
-            <span className="micro !text-steel-400">giwa sepolia</span>
-          </span>
-          {!isConnected ? (
-            <div className="relative" ref={pickerRef}>
-              <button className="btn-primary" disabled={isPending} onClick={onConnect}>
-                {isPending ? "connecting…" : "connect"}
-              </button>
-              {picking && (
-                <div className="absolute right-0 z-30 mt-2 w-56 overflow-hidden rounded-md border border-hairline bg-ink-900 shadow-soft">
-                  {connectors.length === 0 && (
-                    <p className="px-3 py-3 text-[12px] leading-relaxed text-steel-400">
-                      no wallet detected. install a browser wallet, or open this page inside your
-                      wallet&apos;s own browser.
-                    </p>
-                  )}
-                  {connectors.map((c) => (
-                    <button
-                      key={c.uid}
-                      className="block w-full px-3 py-2.5 text-left text-[12px] text-steel-300 transition hover:bg-ink-850 hover:text-char"
-                      onClick={() => {
-                        setPicking(false);
-                        connect({ connector: c });
-                      }}
-                    >
-                      {c.name}
-                    </button>
-                  ))}
-                </div>
-              )}
+          {!soon && (
+            <div className="mx-auto max-w-page border-t border-paper-line px-5 py-4 sm:hidden">
+              <TestFundsPanel />
             </div>
-          ) : wrongChain ? (
-            <button className="btn-primary" onClick={() => switchChain({ chainId: giwaSepolia.id })}>
-              switch to giwa
-            </button>
-          ) : (
-            <button className="btn-ghost normal-case" onClick={() => disconnect()}>
-              <span className="dot bg-yield" />
-              {shortAddr(address!)}
-            </button>
           )}
         </div>
-      </div>
+      )}
     </header>
   );
 }

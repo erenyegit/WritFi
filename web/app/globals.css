@@ -2,79 +2,278 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply bg-ink-950 font-sans text-[14px] leading-relaxed text-steel-300 antialiased;
+/* ---------------------------------------------------------------- themes */
+
+/* Channels only ("R G B"), so Tailwind can add opacity. Two themes, picked by
+   data-theme on <html> (the toggle in the header remembers the choice). Day is
+   the default and the main design: white paper, navy-black ink and the logo's
+   cobalt, like a printed certificate. Night is the same print on warm black.
+   Colour is flat everywhere: no navy fields, no glow, no gradients. */
+
+:root,
+[data-theme="day"] {
+  color-scheme: light;
+  --paper: 245 246 248;
+  --paper-sheet: 255 255 255;
+  --paper-sunk: 239 241 245;
+  --paper-tint: 233 236 242;
+  --paper-line: 225 228 236;
+  --paper-rule: 196 201 214;
+  --ink: 13 20 40;
+  --ink-700: 42 50 76;
+  --ink-500: 86 94 120;
+  --ink-400: 122 129 152;
+  --ink-300: 165 171 190;
+  --brand: 36 62 176;
+  --brand-50: 234 238 251;
+  --brand-500: 27 48 146;
+  --brand-600: 36 62 176;
+  --on-brand: 255 255 255;
+  --feature: 33 57 164;
+  --on-feature: 255 255 255;
+  --on-feature-muted: 196 207 246;
+  --heat: 36 62 176;
+  --good: 16 130 98;
+  --warn: 176 70 140;
+  --bad: 196 48 62;
 }
 
-::selection {
-  @apply bg-arc-500/25 text-char;
+[data-theme="night"] {
+  color-scheme: dark;
+  --paper: 18 17 16;
+  --paper-sheet: 26 25 23;
+  --paper-sunk: 14 13 12;
+  --paper-tint: 34 33 31;
+  --paper-line: 44 42 39;
+  --paper-rule: 68 66 61;
+  --ink: 243 241 236;
+  --ink-700: 210 207 200;
+  --ink-500: 158 154 146;
+  --ink-400: 120 117 110;
+  --ink-300: 84 81 76;
+  --brand: 140 165 245;
+  --brand-50: 30 33 48;
+  --brand-500: 64 96 232;
+  --brand-600: 46 76 214;
+  --on-brand: 255 255 255;
+  --feature: 33 57 164;
+  --on-feature: 255 255 255;
+  --on-feature-muted: 196 207 246;
+  --heat: 140 165 245;
+  --good: 98 200 160;
+  --warn: 236 160 196;
+  --bad: 255 128 140;
 }
 
-/* ---------------------------------------------------------------- panels */
-
-.panel {
-  @apply rounded-xl border border-inkline bg-ink-900 shadow-soft;
+/* Faces (loaded in app/layout.tsx). The geometric sans sets both the text and
+   the headlines; figures and labels stay in mono. ?font=plex brings back IBM
+   Plex Sans and Serif for comparison. */
+:root {
+  --font-sans: var(--font-geo);
+  --font-serif: var(--font-geo);
 }
 
-.panel-inset {
-  @apply rounded-lg border border-hairline bg-ink-850;
+html[data-font="plex"] {
+  --font-sans: var(--font-plex-sans);
+  --font-serif: var(--font-plex-serif);
+}
+
+html[data-font="plex"] .display {
+  letter-spacing: -0.015em;
+}
+
+/* The coming soon splash keeps its own dark stage, edge to edge. */
+html:has(.cs-stage) {
+  background-color: #05081a;
+}
+
+/* ---------------------------------------------------------------- base */
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    background-color: rgb(var(--paper));
+  }
+
+  body {
+    @apply bg-paper font-sans text-[15px] leading-[1.55] text-ink-700 antialiased;
+    font-feature-settings: "kern", "liga";
+  }
+
+  ::selection {
+    @apply bg-brand-600 text-brand-on;
+  }
+
+  :focus-visible {
+    @apply outline outline-2 outline-offset-2 outline-brand;
+  }
+
+  h1,
+  h2,
+  h3 {
+    @apply text-ink;
+    text-wrap: balance;
+  }
 }
 
 /* ---------------------------------------------------------------- type */
 
-.micro {
-  /* Arc-style {MICRO LABEL} */
-  @apply font-mono text-[10.5px] font-semibold uppercase tracking-[0.12em] text-steel-400;
+@layer components {
+  /* Serif for statements and the one number that matters on a screen. */
+  .display {
+    @apply font-serif font-medium tracking-[-0.025em] text-ink;
+  }
+
+  /* Small mono labels: column heads, field names, eyebrows. */
+  .label {
+    @apply font-mono text-[11px] font-medium uppercase tracking-[0.09em] text-ink-500;
+  }
+
+  /* The small label above a page or section title, in the theme's accent. */
+  .eyebrow {
+    @apply label inline-flex items-center gap-2 text-brand;
+  }
+
+  .eyebrow::before {
+    content: "";
+    @apply h-1.5 w-1.5 rounded-[1px] bg-brand;
+  }
+
+  /* Every figure is mono with fixed-width digits, so columns line up. */
+  .num {
+    @apply font-mono tabular-nums;
+  }
+
+  .link {
+    @apply text-ink underline decoration-ink-400 underline-offset-[3px] transition hover:decoration-ink;
+  }
+
+  /* ---------------------------------------------------------------- surfaces */
+
+  /* A panel: one step lighter than the page, outlined, flat. */
+  .sheet {
+    @apply rounded-sheet border border-paper-line bg-paper-sheet;
+  }
+
+  /* A panel you can pick up: the border brightens under the pointer. */
+  .sheet-hover {
+    @apply transition-colors duration-150 hover:border-paper-rule;
+  }
+
+  .inset {
+    @apply rounded border border-paper-line bg-paper-sunk;
+  }
+
+  .rule {
+    @apply border-paper-line;
+  }
+
+  /* A square holding a line icon, tinted with the accent. */
+  .icon-tile {
+    @apply inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand;
+  }
+
+  /* ---------------------------------------------------------------- controls */
+
+  .btn {
+    @apply inline-flex h-11 select-none items-center justify-center gap-2 whitespace-nowrap rounded-md px-5 text-[15px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .btn-primary {
+    @apply btn bg-brand-600 text-brand-on hover:bg-brand-500;
+  }
+
+  .btn-ink {
+    @apply btn bg-ink text-paper hover:bg-ink-700;
+  }
+
+  .btn-quiet {
+    @apply btn border border-paper-rule bg-transparent text-ink hover:border-ink-400 hover:bg-paper-tint;
+  }
+
+  .btn-sm {
+    @apply h-9 px-3.5 text-[14px];
+  }
+
+  .chip {
+    @apply inline-flex h-8 items-center justify-center rounded-md border border-paper-line bg-paper-sunk px-2.5 font-mono text-[12.5px] text-ink-700 transition hover:border-paper-rule hover:text-ink disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .chip[data-active="true"] {
+    @apply border-ink bg-ink text-paper;
+  }
+
+  .field {
+    @apply h-12 w-full rounded-lg border border-paper-rule bg-paper-sunk px-3.5 font-mono text-[17px] tabular-nums text-ink outline-none transition placeholder:text-ink-300 focus:border-ink-400;
+  }
+
+  /* Two-way switch with a sliding underline, used for put / call. */
+  .switch {
+    @apply grid grid-cols-2 border-b border-paper-line;
+  }
+
+  .switch > button {
+    @apply relative -mb-px border-b-2 border-transparent px-1 pb-3 pt-1 text-left transition hover:text-ink;
+  }
+
+  .switch > button[data-active="true"] {
+    @apply border-ink text-ink;
+  }
+
+  /* ---------------------------------------------------------------- tables */
+
+  .table-head {
+    @apply label border-b border-paper-line bg-paper-sunk;
+  }
+
+  .dotted-row {
+    @apply flex items-baseline gap-2;
+  }
+
+  /* A leader line between a label and its value, like a printed statement. */
+  .dotted-row > .leader {
+    @apply mb-[5px] min-w-[16px] flex-1 border-b border-dotted border-paper-rule;
+  }
+
+  .dot {
+    @apply inline-block h-1.5 w-1.5 shrink-0 rounded-full;
+  }
+
+  /* Something running right now. */
+  .dot-live {
+    @apply dot bg-good;
+  }
+
+  /* The half-circles bitten out of each end of a ticket's tear line. The
+     ticket clips the outer half; the ring carries its outline round the bite. */
+  .ticket-notch {
+    @apply pointer-events-none absolute z-[2] h-6 w-6 rounded-full border border-paper-line bg-paper;
+  }
 }
 
-.micro-amber {
-  @apply micro text-amber;
+/* A ticket's tear line: holes punched in the page colour, across the top of
+   the stub on a phone and down its side from lg. */
+.ticket-perf {
+  position: absolute;
+  top: -4px;
+  left: 18px;
+  right: 18px;
+  height: 8px;
+  pointer-events: none;
+  background: radial-gradient(circle, rgb(var(--paper)) 2.2px, transparent 2.8px) center / 12px 8px repeat-x;
 }
 
-.display {
-  @apply font-display font-bold tracking-tight text-char;
-}
-
-.num {
-  @apply font-mono tabular-nums;
-}
-
-/* ---------------------------------------------------------------- buttons */
-
-.btn {
-  @apply inline-flex h-9 items-center justify-center gap-2 rounded-full px-5 font-mono text-[12px] font-semibold uppercase tracking-wider transition disabled:cursor-not-allowed disabled:opacity-35;
-}
-
-.btn-primary {
-  @apply btn bg-arc-500 text-white shadow-soft hover:bg-arc-600;
-}
-
-.btn-ghost {
-  @apply btn border border-inkline bg-ink-900 text-char shadow-soft hover:bg-ink-850;
-}
-
-.btn-lg {
-  @apply h-12 px-7 text-[13px];
-}
-
-/* ---------------------------------------------------------------- fields */
-
-.field {
-  @apply h-10 w-full rounded-lg border border-inkline bg-ink-900 px-3 font-mono text-[13px] text-char outline-none transition focus:border-arc-500;
-}
-
-.label {
-  @apply micro mb-2 block;
-}
-
-/* ---------------------------------------------------------------- table */
-
-.trow {
-  @apply grid items-center gap-3 border-b border-hairline px-4 py-3 last:border-b-0;
-}
-
-.thead {
-  @apply micro border-b border-hairline bg-ink-850 px-4 py-2.5;
+@media (min-width: 1024px) {
+  .ticket-perf {
+    top: 18px;
+    bottom: 18px;
+    left: -4px;
+    right: auto;
+    width: 8px;
+    height: auto;
+    background-size: 8px 12px;
+    background-repeat: repeat-y;
+  }
 }
 
 /* ---------------------------------------------------------------- misc */
@@ -87,95 +286,142 @@ summary::-webkit-details-marker {
   display: none;
 }
 
-.dot {
-  @apply inline-block h-1.5 w-1.5 rounded-full;
-}
-
-.tick {
-  @apply text-yield;
-}
-
-/* segmented control */
-.seg {
-  @apply grid grid-cols-2 gap-1 overflow-hidden rounded-full border border-hairline bg-ink-850 p-1;
-}
-
-.seg > button {
-  @apply h-9 rounded-full font-mono text-[12px] font-semibold uppercase tracking-wider text-steel-400 transition;
-}
-
-.seg > button[data-active="true"] {
-  @apply bg-char text-white shadow-soft;
-}
-
-/* quote ttl bar */
-@keyframes drain {
+/* The remaining life of a signed quote. */
+@keyframes quote-drain {
   from {
-    width: 100%;
+    transform: scaleX(1);
   }
   to {
-    width: 0%;
+    transform: scaleX(0);
   }
 }
 
-.ttl-bar {
-  @apply h-0.5 rounded-full bg-arc-500;
-  animation: drain 60s linear forwards;
+.quote-timer {
+  @apply h-[2px] origin-left bg-brand;
 }
 
-/* hero interactive range (invisible native input over custom bar) */
-.hero-range {
-  -webkit-appearance: none;
-  appearance: none;
-  background: transparent;
-  pointer-events: none;
-  margin: 0;
-  height: 100%;
-  width: 100%;
+@media (prefers-reduced-motion: reduce) {
+  .quote-timer {
+    animation: none !important;
+  }
 }
 
-.hero-range::-webkit-slider-runnable-track {
-  background: transparent;
-  border: none;
+/* ---------------------------------------------------------------- motion */
+
+/* Sections rise into place the first time they scroll into view. The
+   resting state is the finished one; only the hidden start is styled. */
+.reveal {
+  transition:
+    opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1),
+    transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.hero-range::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 28px;
-  height: 28px;
-  border-radius: 9999px;
-  background: transparent;
-  border: none;
-  pointer-events: auto;
-  cursor: grab;
+.reveal[data-seen="false"] {
+  opacity: 0;
+  transform: translate3d(0, 18px, 0);
 }
 
-.hero-range::-moz-range-track {
-  background: transparent;
-  border: none;
+/* The pass arrives once: up from below, settling as it straightens. */
+@keyframes pass-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 28px, 0) rotateX(14deg);
+  }
 }
 
-.hero-range::-moz-range-thumb {
-  width: 28px;
-  height: 28px;
-  border-radius: 9999px;
-  background: transparent;
-  border: none;
-  pointer-events: auto;
-  cursor: grab;
+.pass-enter {
+  animation: pass-enter 1.1s cubic-bezier(0.16, 1, 0.3, 1) 0.15s both;
 }
 
-.hero-range:focus-visible {
-  outline: none;
+/* Progress segments fill from the left when a step is done. */
+.fill-in {
+  transform-origin: left;
+  animation: fill-in 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-.hero-range:focus-visible::-webkit-slider-thumb {
-  box-shadow: 0 0 0 3px rgba(61, 94, 224, 0.45);
+@keyframes fill-in {
+  from {
+    transform: scaleX(0);
+  }
 }
 
-.hero-range:focus-visible::-moz-range-thumb {
-  box-shadow: 0 0 0 3px rgba(61, 94, 224, 0.45);
+/* The steps dial: the bezel turns once every two minutes. */
+.dial-bezel {
+  transform-box: view-box;
+  transform-origin: 50% 50%;
+  animation: dial-turn 120s linear infinite;
+}
+
+@keyframes dial-turn {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* A stroke that draws itself in, start to end, once it is on screen. The path
+   has pathLength 1, so a dash of 1 is the whole stroke; the gap of 2 keeps the
+   round caps out of sight while it waits. */
+.dial-arc {
+  stroke-dasharray: 1 2;
+  animation: dial-arc 1.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+[data-seen="false"] .dial-arc {
+  animation-play-state: paused;
+}
+
+@keyframes dial-arc {
+  from {
+    stroke-dashoffset: 1.05;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* The news band under the header runs left forever; the run is drawn twice and
+   moved by half its width, so the loop has no seam. */
+.phase-band {
+  animation: phase-band 60s linear infinite;
+}
+
+@keyframes phase-band {
+  to {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+/* Leaderboard score bars fill from the left when the board comes into view. */
+.depth {
+  transform-origin: left;
+  transition: transform 1.1s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+[data-seen="false"] .depth {
+  transform: scaleX(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal,
+  .reveal[data-seen="false"] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .pass-enter,
+  .fill-in,
+  .dial-bezel,
+  .dial-arc,
+  .phase-band {
+    animation: none;
+  }
+
+  .depth,
+  [data-seen="false"] .depth {
+    transform: none;
+    transition: none;
+  }
 }
 
 /* ---------------------------------------------------------------- coming soon */
@@ -187,6 +433,8 @@ summary::-webkit-details-marker {
 
 .cs-stage {
   @apply relative isolate flex items-center justify-center overflow-hidden;
+  /* the splash's small print stays in IBM Plex, whatever face the desk uses */
+  font-family: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
   min-height: 100vh;
   min-height: 100svh;
   padding-block: 64px;
@@ -326,7 +574,8 @@ summary::-webkit-details-marker {
 /* ---- type */
 
 .cs-headline {
-  @apply font-display font-medium;
+  @apply font-medium;
+  font-family: var(--font-grotesk), ui-sans-serif, system-ui, sans-serif;
   margin-top: clamp(40px, 8vw, 60px);
   font-size: clamp(40px, 10vw, 68px);
   line-height: 1.05;
@@ -375,7 +624,8 @@ summary::-webkit-details-marker {
 }
 
 .cs-domain {
-  @apply font-display font-medium;
+  @apply font-medium;
+  font-family: var(--font-grotesk), ui-sans-serif, system-ui, sans-serif;
   margin-top: clamp(18px, 4vw, 26px);
   font-size: clamp(16px, 4.2vw, 19px);
   letter-spacing: 0.01em;
@@ -385,6 +635,39 @@ summary::-webkit-details-marker {
 
 .cs-domain span {
   color: #8fa5ff;
+}
+
+/* the one way in while the site sits behind the splash */
+.cs-cta {
+  @apply inline-flex items-center gap-2 rounded-full font-medium;
+  font-family: var(--font-grotesk), ui-sans-serif, system-ui, sans-serif;
+  margin-top: clamp(24px, 5vw, 34px);
+  height: 42px;
+  padding: 0 20px;
+  font-size: 15px;
+  letter-spacing: 0.005em;
+  color: rgba(232, 237, 255, 0.92);
+  border: 1px solid rgba(143, 165, 255, 0.32);
+  background: rgba(143, 165, 255, 0.07);
+  transition:
+    color 0.2s ease,
+    border-color 0.2s ease,
+    background-color 0.2s ease;
+  animation: cs-rise-in 1.2s cubic-bezier(0.16, 1, 0.3, 1) 1.85s both;
+}
+
+.cs-cta:hover {
+  color: #fff;
+  border-color: rgba(143, 165, 255, 0.65);
+  background: rgba(143, 165, 255, 0.14);
+}
+
+.cs-cta-arrow {
+  transition: transform 0.2s ease;
+}
+
+.cs-cta:hover .cs-cta-arrow {
+  transform: translateX(3px);
 }
 
 /* bottom row: X link on the left, GASOK card on the right, centered on one axis */
@@ -503,7 +786,8 @@ summary::-webkit-details-marker {
 }
 
 .cs-proof-title {
-  @apply font-display font-medium;
+  @apply font-medium;
+  font-family: var(--font-grotesk), ui-sans-serif, system-ui, sans-serif;
   font-size: 14.5px;
   line-height: 1.25;
   color: #eef1fb;

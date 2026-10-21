@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { GasokProof } from "@/components/GasokProof";
 import { XIcon } from "@/components/Icons";
 import { MARK_PATH } from "@/components/Logo";
@@ -58,6 +60,13 @@ export function ComingSoon() {
         <p className="cs-domain">
           writ<span>.fi</span>
         </p>
+
+        <Link href="/early" className="cs-cta">
+          Join early access
+          <span aria-hidden="true" className="cs-cta-arrow">
+            →
+          </span>
+        </Link>
 
       </div>
 

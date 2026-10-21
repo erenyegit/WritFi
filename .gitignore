@@ -13,6 +13,9 @@ broadcast/
 
 # next.js
 .next/
+
+# local early access database (PGlite)
+.data/
 next-env.d.ts
 
 # build

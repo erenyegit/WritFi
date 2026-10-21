@@ -11,7 +11,7 @@ const description = "Writ Fi is coming soon.";
 const image = { url: "/opengraph-image", width: 1200, height: 630, alt: "Writ Fi" };
 
 export const metadata: Metadata = {
-  title,
+  title: { absolute: title },
   description,
   alternates: { canonical: "/" },
   openGraph: { title, description, url: "/", siteName: "Writ Fi", type: "website", images: [image] },

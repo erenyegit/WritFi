@@ -23,3 +23,15 @@ export function LogoMark({ size = 32, className = "" }: { size?: number; classNa
     </svg>
   );
 }
+
+/**
+ * The W alone, cropped to the letterform and drawn in currentColor, for large
+ * faint marks behind a panel.
+ */
+export function MarkGlyph({ className = "" }: { className?: string }) {
+  return (
+    <svg viewBox="48 120 304 200" className={className} aria-hidden="true">
+      <path d={MARK_PATH} fill="currentColor" />
+    </svg>
+  );
+}
