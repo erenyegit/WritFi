@@ -3,7 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "pricing:dev": "pnpm --filter @writ-giwa/pricing dev",
-    "web:dev": "pnpm --filter @writ-giwa/web dev"
+    "dev": "pnpm --filter @writ-giwa/web dev",
+    "build": "pnpm --filter @writ-giwa/web build",
+    "typecheck": "pnpm --filter @writ-giwa/web typecheck",
+    "test:contracts": "cd contracts && forge test",
+    "abi": "cd contracts && forge build && cd ../web && node scripts/gen-abi.mjs"
   }
 }

@@ -1,21 +1,24 @@
 import { defineChain } from "viem";
 
 /**
- * GIWA Sepolia — Upbit's OP Stack L2.
+ * GIWA Sepolia, Upbit's OP Stack L2.
  *
  * Reads and writes go through the Flashblocks endpoint, which preconfirms
- * transactions in ~200ms instead of waiting the full ~1s block. That latency
- * is what lets the desk sign short-lived quotes (see QUOTE_TTL_SEC): the
- * shorter a quote lives, the less stale-price risk the desk prices in, and
- * the more premium the writer keeps.
+ * transactions in about 200ms instead of waiting for the full block. That is
+ * what lets quotes live only 20 seconds: the shorter a quote lives, the less
+ * stale-price risk a maker prices in, and the more premium the writer keeps.
+ *
+ * NEXT_PUBLIC_RPC_URL overrides the endpoint, for a local fork during testing.
  */
+const rpc = process.env.NEXT_PUBLIC_RPC_URL || "https://sepolia-rpc-flashblocks.giwa.io";
+
 export const giwaSepolia = defineChain({
   id: 91342,
   name: "GIWA Sepolia",
   nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
   rpcUrls: {
-    default: { http: ["https://sepolia-rpc-flashblocks.giwa.io"] },
-    // Standard endpoint, kept for tooling that does not expect preconfirmations.
+    default: { http: [rpc] },
+    // Standard endpoint, for tooling that does not expect preconfirmations.
     standard: { http: ["https://sepolia-rpc.giwa.io"] },
   },
   blockExplorers: {

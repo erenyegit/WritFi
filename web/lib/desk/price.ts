@@ -13,6 +13,7 @@
  * gap between the two, which for BTC/USD is a few basis points.
  */
 
+import { BTC_USD_FEED_ID } from "../deployments";
 import { deskConfig, hermesHeaders } from "./config";
 
 export type SpotSource = "pyth" | "coinbase" | "kraken";
@@ -44,13 +45,18 @@ async function getJson(url: string, headers?: Record<string, string>): Promise<u
   return res.json();
 }
 
+/** A Pyth price older than this is a stalled feed, not a quiet market. */
+const PYTH_MAX_AGE_SEC = 60;
+
 async function fromPyth(): Promise<number> {
   const body = (await getJson(
-    `${deskConfig.hermesUrl}/v2/updates/price/latest?ids[]=${deskConfig.btcFeedId}`,
+    `${deskConfig.hermesUrl}/v2/updates/price/latest?ids[]=${BTC_USD_FEED_ID}&parsed=true`,
     hermesHeaders(),
-  )) as { parsed?: { price: { price: string; expo: number } }[] };
+  )) as { parsed?: { price: { price: string; expo: number; publish_time: number } }[] };
   const p = body.parsed?.[0]?.price;
   if (!p) throw new Error("pyth: empty price");
+  const age = Math.floor(Date.now() / 1000) - p.publish_time;
+  if (age > PYTH_MAX_AGE_SEC) throw new Error(`pyth: price is ${age}s old`);
   return Number(p.price) * 10 ** p.expo;
 }
 

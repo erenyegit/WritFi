@@ -1,79 +1,80 @@
 import { NextResponse } from "next/server";
 
-import { bsCall, bsPut } from "@/lib/desk/bs";
-import { atmVol, deskSpread, impliedVol } from "@/lib/desk/surface";
+import { upcomingExpiries } from "@/lib/expiry";
+import { readBook } from "@/lib/desk/book";
 import { getSpot } from "@/lib/desk/price";
+import { getVolSurface } from "@/lib/desk/marketVol";
+import { priceOption, strikeLadder, YEAR_SEC } from "@/lib/desk/pricing";
 
 export const dynamic = "force-dynamic";
 
-/** Headline rates are quoted at this tenor. */
-const REF_TENOR_SEC = 7 * 86400;
-
-/** Market snapshot: spot, IV, a strike ladder, and the next daily expiries. */
+/**
+ * Everything a writer needs before asking for a firm price: spot, the listed
+ * expiries and strikes, an indicative rate for every cell, and how much the
+ * maker can currently back. Indicative means unsigned: the firm number comes
+ * from /api/rfq for the exact size.
+ */
 export async function GET() {
   try {
-    const { usd: spot, source: spotSource } = await getSpot();
-
-    const strikes: number[] = [];
-    for (let i = -4; i <= 4; i++) {
-      const raw = spot * (1 + 0.025 * i);
-      const rounded = Math.max(500, Math.round(raw / 500) * 500);
-      if (!strikes.includes(rounded)) strikes.push(rounded);
-    }
-
-    const expiries: number[] = [];
+    const [spot, book, surface] = await Promise.all([getSpot(), readBook().catch(() => null), getVolSurface()]);
     const now = Math.floor(Date.now() / 1000);
-    const d = new Date();
-    d.setUTCHours(8, 0, 0, 0);
-    for (let i = 0; i < 8 && expiries.length < 7; i++) {
-      const t = Math.floor(d.getTime() / 1000) + i * 86400;
-      if (t >= now + 3600) expiries.push(t); // respect min tenor with margin
-    }
+    const expiries = upcomingExpiries(now);
 
-    // Quote the surface at the nearest expiry, so the headline IV matches
-    // what a writer is actually shown first.
-    const nearestTenorYears = expiries.length ? (expiries[0] - now) / (365 * 86400) : 1 / 365;
-
-    // The rate a writer can actually get today, per strategy. Rysk leads with
-    // this because a premium alone is not comparable across strikes or tenors.
-    const aprAt = (strike: number, T: number, isPut: boolean) => {
-      const iv = impliedVol(spot, strike, T);
-      const fair = isPut ? bsPut(spot, strike, T, iv) : bsCall(spot, strike, T, iv);
-      const bid = fair * (1 - deskSpread(spot, strike, T));
-      // Both products commit full notional: a put locks the strike in cash, a
-      // covered call locks one unit of the underlying. So the rates compare.
-      const committedPerBtc = isPut ? strike : spot;
-      return (bid / committedPerBtc / T) * 100;
+    const side = (isPut: boolean) => {
+      const strikes = strikeLadder(isPut, spot.usd);
+      const cells = expiries.map((e) =>
+        strikes.map((k) => {
+          const p = priceOption(isPut, spot.usd, k, (e - now) / YEAR_SEC, surface.iv(e, k, spot.usd, now));
+          return {
+            aprPct: round(p.aprPct, 2),
+            premiumPerBtc: round(p.bidPerBtc, 2),
+            probAssigned: round(p.probAssigned, 4),
+            iv: round(p.iv, 4),
+          };
+        }),
+      );
+      return { strikes, cells };
     };
 
-    // Quoted at one reference tenor rather than across all of them. Annualizing
-    // a one-day premium is arithmetically fine and useless as a headline: it
-    // dominates the range and tells a writer nothing about what they can hold.
-    const refExpiry = expiries.reduce(
-      (best, e) => (Math.abs(e - now - REF_TENOR_SEC) < Math.abs(best - now - REF_TENOR_SEC) ? e : best),
-      expiries[0] ?? now + REF_TENOR_SEC,
+    const maker = book?.maker;
+    const limits = book?.limits;
+    return NextResponse.json(
+      {
+        spot: { usd: spot.usd, source: spot.source, at: spot.at },
+        expiries,
+        ivSource: surface.source,
+        put: side(true),
+        call: side(false),
+        // What the maker can back right now, in BTC of size. A put reserves one
+        // BTC per BTC; a covered call reserves the strike in USDC, so its limit
+        // depends on the strike and is sent as cash for the client to divide.
+        maker: maker
+          ? {
+              active: maker.active,
+              putCapacityBtc: Number(maker.btcFree) / 1e8,
+              callCapacityUsdc: Number(maker.usdcFree) / 1e6,
+              maxPremiumPerBtc: Number(maker.maxPremiumPerBtc) / 1e6,
+            }
+          : null,
+        limits: limits
+          ? {
+              paused: limits.paused,
+              minNotionalUsdc: Number(limits.minPositionNotional) / 1e6,
+              maxNotionalUsdc: Number(limits.maxPositionNotional) / 1e6,
+              openNotionalUsdc: Number(limits.totalOpenNotional) / 1e6,
+              maxTotalNotionalUsdc: Number(limits.maxTotalNotional) / 1e6,
+              lotBtc: 0.0001,
+            }
+          : null,
+      },
+      { headers: { "Cache-Control": "public, s-maxage=5, stale-while-revalidate=10" } },
     );
-    const refTenorYears = (refExpiry - now) / (365 * 86400);
-
-    const aprRange = (isPut: boolean) => {
-      const side = strikes.filter((k) => (isPut ? k <= spot : k >= spot));
-      const rates = side.map((k) => aprAt(k, refTenorYears, isPut));
-      if (!rates.length) return null;
-      return { minPct: Math.min(...rates), maxPct: Math.max(...rates) };
-    };
-
-    return NextResponse.json({
-      spotUsd: spot,
-      spotSource,
-      ivAnnualized: atmVol(nearestTenorYears),
-      strikes,
-      expiries,
-      apr: { put: aprRange(true), call: aprRange(false), refExpiry, refTenorDays: 7 },
-    });
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "market failed" },
+      { error: err instanceof Error ? err.message : "market data unavailable" },
       { status: 502 },
     );
   }
 }
+
+const round = (v: number, d: number) => Math.round(v * 10 ** d) / 10 ** d;

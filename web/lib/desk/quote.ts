@@ -1,32 +1,36 @@
 import { randomBytes } from "node:crypto";
 import { privateKeyToAccount } from "viem/accounts";
 
-import { bsCall, bsPut } from "./bs";
-import { deskConfig } from "./config";
-import { deskSpread, impliedVol } from "./surface";
+import { isGridExpiry } from "../expiry";
+import { readBook, type Book } from "./book";
+import { deskConfig, resolveQuoterKey } from "./config";
+import { getVolSurface } from "./marketVol";
+import { priceOption, YEAR_SEC } from "./pricing";
 
-const YEAR_SEC = 365 * 24 * 3600;
+/** A request the maker will not quote, with the reason in plain words. */
+export class QuoteError extends Error {
+  status = 422;
+}
 
-/** Derived on first use, not at module load: the build should never need to
- *  resolve a secret just to collect route metadata. */
+/** Derived on first use, never at module load: a build must not need the secret. */
 let cachedAccount: ReturnType<typeof privateKeyToAccount> | undefined;
-function deskAccount() {
-  cachedAccount ??= privateKeyToAccount(deskConfig.quoterPrivateKey);
+function quoterAccount() {
+  cachedAccount ??= privateKeyToAccount(resolveQuoterKey());
   return cachedAccount;
 }
 
-export const quoterAddress = () => deskAccount().address;
+export const quoterAddress = () => quoterAccount().address;
 
-/** EIP-712 domain — must match WritOptions' EIP712("WritOptions", "1"). */
-const domain = {
-  name: "WritOptions",
-  version: "1",
+/** Must match WritOptions' EIP712(name, version) and its deployment. */
+export const quoteDomain = {
+  name: deskConfig.eip712.name,
+  version: deskConfig.eip712.version,
   chainId: deskConfig.chainId,
   verifyingContract: deskConfig.coreAddress,
 } as const;
 
-/** Must match QUOTE_TYPEHASH in WritOptions.sol field-for-field. */
-const types = {
+/** Must match QUOTE_TYPEHASH in WritOptions.sol field for field. */
+export const quoteTypes = {
   Quote: [
     { name: "writer", type: "address" },
     { name: "maker", type: "address" },
@@ -45,41 +49,87 @@ export interface QuoteRequest {
   isPut: boolean;
   strikeUsd: number;
   qtyBtc: number;
-  expiry: number; // unix seconds
+  /** Unix seconds; must be an 08:00 UTC fixing. */
+  expiry: number;
 }
 
 const ceilDiv = (a: bigint, b: bigint) => (a + b - 1n) / b;
+const usdc = (v: bigint) => (Number(v) / 1e6).toLocaleString("en-US", { maximumFractionDigits: 2 });
+const btc = (v: bigint) => (Number(v) / 1e8).toLocaleString("en-US", { maximumFractionDigits: 8 });
 
-export async function buildSignedQuote(req: QuoteRequest, spot: number) {
+/** Mirror of OptionMath.notionalUsdc: strike (1e8) x qty (1e8) -> USDC (1e6), rounded up. */
+export const notionalUsdc = (strike: bigint, qty: bigint) => ceilDiv(strike * qty, 10n ** 10n);
+
+/**
+ * Validate a request against the market and the maker's own book, price it,
+ * and sign it. Everything the contract would reject is rejected here first,
+ * with a reason a writer can act on, before they spend gas finding out.
+ */
+export async function buildSignedQuote(req: QuoteRequest, spot: number, book?: Book) {
+  const b = book ?? (await readBook());
   const now = Math.floor(Date.now() / 1000);
-  const T = (req.expiry - now) / YEAR_SEC;
-  if (T <= 0) throw new Error("expiry is in the past");
-  if (req.qtyBtc <= 0 || req.strikeUsd <= 0) throw new Error("invalid size or strike");
 
-  // Vol comes from the surface, so a far strike and a near one are not priced
-  // off the same number.
-  const iv = impliedVol(spot, req.strikeUsd, T);
-  // A covered call is the plain, uncapped call: the underlying it posts covers
-  // its own upside, so there is no short leg to subtract.
-  const fairPerBtc = req.isPut
-    ? bsPut(spot, req.strikeUsd, T, iv, deskConfig.riskFreeRate)
-    : bsCall(spot, req.strikeUsd, T, iv, deskConfig.riskFreeRate);
-  const spread = deskSpread(spot, req.strikeUsd, T);
-  const fairUsd = fairPerBtc * req.qtyBtc;
-  const bidUsd = fairUsd * (1 - spread);
+  // ---- market state
+  if (b.limits.paused) throw new QuoteError("New positions are paused. Open positions still settle.");
+  if (!b.maker.active) throw new QuoteError("This maker has stopped quoting for now.");
 
-  const premium = BigInt(Math.floor(bidUsd * 1e6)); // USDC 1e6
-  if (premium <= 0n) throw new Error("premium rounds to zero — size too small");
+  // ---- expiry: a listed fixing inside the contract's tenor bounds
+  if (!isGridExpiry(req.expiry)) throw new QuoteError("Expiry must be one of the listed 08:00 UTC fixings.");
+  // Two minutes of headroom over minTenor, so a quote signed now still lands in range.
+  if (req.expiry < now + Number(b.limits.minTenor) + 120) throw new QuoteError("That expiry is too close to quote.");
+  if (req.expiry > now + Number(b.limits.maxTenor)) throw new QuoteError("That expiry is too far out to quote.");
+
+  // ---- strike: positive, whole dollars, out of the money
+  if (!Number.isFinite(req.strikeUsd) || req.strikeUsd <= 0 || !Number.isInteger(req.strikeUsd)) {
+    throw new QuoteError("Strike must be a whole-dollar price.");
+  }
+  if (req.isPut ? req.strikeUsd >= spot : req.strikeUsd <= spot) {
+    throw new QuoteError(
+      req.isPut
+        ? `A put strike must be below spot ($${Math.round(spot).toLocaleString("en-US")}).`
+        : `A covered call strike must be above spot ($${Math.round(spot).toLocaleString("en-US")}).`,
+    );
+  }
+
+  // ---- size: whole lots
+  const qty = BigInt(Math.round(req.qtyBtc * 1e8));
+  if (!Number.isFinite(req.qtyBtc) || qty <= 0n) throw new QuoteError("Enter a size.");
+  if (qty % deskConfig.lotSats !== 0n) throw new QuoteError("Size must be a multiple of 0.0001 BTC.");
 
   const strike = BigInt(Math.round(req.strikeUsd * 1e8));
-  const qty = BigInt(Math.round(req.qtyBtc * 1e8));
+  const notional = notionalUsdc(strike, qty);
+  if (notional < b.limits.minPositionNotional) {
+    throw new QuoteError(`Minimum position is ${usdc(b.limits.minPositionNotional)} USDC of notional.`);
+  }
+  if (notional > b.limits.maxPositionNotional) {
+    throw new QuoteError(`Maximum position is ${usdc(b.limits.maxPositionNotional)} USDC of notional.`);
+  }
+  if (b.limits.totalOpenNotional + notional > b.limits.maxTotalNotional) {
+    throw new QuoteError("The market is at its open-interest cap.");
+  }
 
-  // Mirror of OptionMath.notionalUsdc — the cash side of the trade, quoted
-  // once so a put's collateral and a covered call's proceeds always agree.
-  const notional = ceilDiv(strike * qty, 10n ** 10n);
-  if (premium >= notional) throw new Error("premium >= notional — refusing to quote");
-  // A put locks that cash; a covered call locks the underlying, one for one.
-  const collateral = req.isPut ? notional : qty;
+  // ---- price
+  const T = (req.expiry - now) / YEAR_SEC;
+  const surface = await getVolSurface();
+  const p = priceOption(req.isPut, spot, req.strikeUsd, T, surface.iv(req.expiry, req.strikeUsd, spot, now));
+  let premium = BigInt(Math.floor(p.bidPerBtc * req.qtyBtc * 1e6));
+  // The maker's own cap: a signed quote above it would revert on-chain.
+  if (b.maker.maxPremiumPerBtc > 0n) {
+    const cap = (b.maker.maxPremiumPerBtc * qty) / 100_000_000n;
+    if (premium > cap) premium = cap;
+  }
+  if (premium <= 0n) throw new QuoteError("The premium rounds to zero at this size. Try a larger size.");
+  if (premium >= notional) throw new QuoteError("The maker will not quote this strike.");
+
+  // ---- the maker must hold what it may owe, plus the premium it pays now
+  if (req.isPut) {
+    if (b.maker.btcFree < qty) {
+      throw new QuoteError(`The maker can back up to ${btc(b.maker.btcFree)} BTC of puts right now.`);
+    }
+    if (b.maker.usdcFree < premium) throw new QuoteError("The maker is out of USDC for premiums right now.");
+  } else if (b.maker.usdcFree < notional + premium) {
+    throw new QuoteError("The maker does not hold enough USDC to back this call right now. Try a smaller size.");
+  }
 
   const quote = {
     writer: req.writer,
@@ -93,12 +143,15 @@ export async function buildSignedQuote(req: QuoteRequest, spot: number) {
     nonce: BigInt("0x" + randomBytes(32).toString("hex")),
   };
 
-  const signature = await deskAccount().signTypedData({
-    domain,
-    types,
+  const signature = await quoterAccount().signTypedData({
+    domain: quoteDomain,
+    types: quoteTypes,
     primaryType: "Quote",
     message: quote,
   });
+
+  const premiumUsd = Number(premium) / 1e6;
+  const committedUsd = req.isPut ? Number(notional) / 1e6 : req.qtyBtc * spot;
 
   return {
     quote: {
@@ -115,27 +168,22 @@ export async function buildSignedQuote(req: QuoteRequest, spot: number) {
     signature,
     meta: {
       spotUsd: spot,
-      ivAnnualized: iv,
-      deskSpread: spread,
+      ivAnnualized: p.iv,
+      ivSource: surface.source,
+      spread: p.spread,
       tenorYears: T,
-      fairValueUsd: fairUsd,
-      deskBidUsd: bidUsd,
-      premiumUsdc: quote.premium.toString(),
-      collateralUsdc: collateral.toString(),
-      collateralAsset: req.isPut ? ("usdc" as const) : ("btc" as const),
+      fairValueUsd: p.fairPerBtc * req.qtyBtc,
+      premiumUsdc: premium.toString(),
       notionalUsdc: notional.toString(),
-      /**
-       * The premium as an annualized rate on the capital it locks up. This is
-       * the number a writer actually compares between strikes and tenors; a
-       * raw premium says nothing without the tenor beside it.
-       */
-      /** Both products commit full notional, so the rates are comparable:
-       *  a put locks the cash, a covered call locks an asset worth about it. */
-      aprPct:
-        (Number(premium) / 1e6 / (req.isPut ? (Number(notional) / 1e6) : req.qtyBtc * spot) / T) *
-        100,
+      /** USDC (1e6) for a put, BTC (1e8) for a covered call. */
+      collateral: (req.isPut ? notional : qty).toString(),
+      collateralAsset: req.isPut ? ("USDC" as const) : ("BTC" as const),
+      aprPct: (premiumUsd / committedUsd / T) * 100,
+      probAssigned: p.probAssigned,
       maker: deskConfig.makerAddress,
       quoter: quoterAddress(),
     },
   };
 }
+
+export type SignedQuote = Awaited<ReturnType<typeof buildSignedQuote>>;

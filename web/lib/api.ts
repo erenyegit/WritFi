@@ -1,18 +1,40 @@
-/** Desk endpoints are served by this app's own /api routes (Vercel functions). */
+/** Browser-side client for this app's own /api routes. */
 
-export interface AprRange {
-  minPct: number;
-  maxPct: number;
+export interface Cell {
+  aprPct: number;
+  premiumPerBtc: number;
+  probAssigned: number;
+  iv: number;
+}
+
+export interface SideBoard {
+  /** Out of the money only; puts descend from spot, calls ascend. */
+  strikes: number[];
+  /** cells[expiryIndex][strikeIndex]. */
+  cells: Cell[][];
 }
 
 export interface Market {
-  spotUsd: number;
-  /** Which provider answered: "pyth", "coinbase" or "kraken". */
-  spotSource: string;
-  ivAnnualized: number;
-  strikes: number[];
+  spot: { usd: number; source: "pyth" | "coinbase" | "kraken"; at: number };
   expiries: number[];
-  apr: { put: AprRange | null; call: AprRange | null; refExpiry: number; refTenorDays: number };
+  /** Where the implied vols behind every rate came from. */
+  ivSource: "deribit" | "model";
+  put: SideBoard;
+  call: SideBoard;
+  maker: {
+    active: boolean;
+    putCapacityBtc: number;
+    callCapacityUsdc: number;
+    maxPremiumPerBtc: number;
+  } | null;
+  limits: {
+    paused: boolean;
+    minNotionalUsdc: number;
+    maxNotionalUsdc: number;
+    openNotionalUsdc: number;
+    maxTotalNotionalUsdc: number;
+    lotBtc: number;
+  } | null;
 }
 
 export interface SignedQuote {
@@ -28,48 +50,45 @@ export interface SignedQuote {
     nonce: string;
   };
   signature: `0x${string}`;
-  /** Populated by /api/rfq: how many makers answered, and how many were asked. */
   competingBids?: number;
   makersAsked?: number;
   meta: {
     spotUsd: number;
     ivAnnualized: number;
+    ivSource: "deribit" | "model";
+    spread: number;
     tenorYears: number;
     fairValueUsd: number;
-    deskBidUsd: number;
     premiumUsdc: string;
-    collateralUsdc: string;
-    collateralAsset: "usdc" | "btc";
     notionalUsdc: string;
+    collateral: string;
+    collateralAsset: "USDC" | "BTC";
     aprPct: number;
-    deskSpread: number;
+    probAssigned: number;
     maker: `0x${string}`;
     quoter: `0x${string}`;
   };
 }
 
-export async function getMarket(): Promise<Market> {
-  const res = await fetch(`/api/market`);
-  if (!res.ok) throw new Error(`market: ${res.status}`);
-  return res.json();
+async function json<T>(res: Response): Promise<T> {
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((body as { error?: string }).error ?? `request failed (${res.status})`);
+  return body as T;
 }
 
-export async function getQuote(params: {
-  writer: `0x${string}`;
-  isPut: boolean;
-  strike: number;
-  qty: number;
-  expiry: number;
-}): Promise<SignedQuote> {
+export const getMarket = () => fetch("/api/market", { cache: "no-store" }).then((r) => json<Market>(r));
+
+export function getQuote(p: { writer: `0x${string}`; isPut: boolean; strike: number; qty: number; expiry: number }) {
   const q = new URLSearchParams({
-    writer: params.writer,
-    isPut: String(params.isPut),
-    strike: String(params.strike),
-    qty: String(params.qty),
-    expiry: String(params.expiry),
+    writer: p.writer,
+    isPut: String(p.isPut),
+    strike: String(p.strike),
+    qty: String(p.qty),
+    expiry: String(p.expiry),
   });
-  const res = await fetch(`/api/rfq?${q.toString()}`);
-  const body = await res.json();
-  if (!res.ok) throw new Error(body.error ?? `quote: ${res.status}`);
-  return body;
+  return fetch(`/api/rfq?${q}`, { cache: "no-store" }).then((r) => json<SignedQuote>(r));
 }
+
+/** The signed Pyth update for a past fixing, ready for settle()'s oracleData. */
+export const getSettlementUpdate = (expiry: number) =>
+  fetch(`/api/settlement?expiry=${expiry}`).then((r) => json<{ updates: `0x${string}`[] }>(r)).then((b) => b.updates);

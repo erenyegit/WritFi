@@ -16,12 +16,12 @@ const env = (k: string, d: number) => Number(process.env[k] ?? d);
 
 const P = {
   /** ATM vol as tenor goes to zero, and as it goes to infinity. */
-  atmShort: env("VOL_ATM_SHORT", 0.65),
-  atmLong: env("VOL_ATM_LONG", 0.5),
+  atmShort: env("VOL_ATM_SHORT", 0.48),
+  atmLong: env("VOL_ATM_LONG", 0.45),
   /** Decay constant in years: how fast short-dated vol relaxes to the long one. */
   tau: env("VOL_TAU_YEARS", 0.25),
   /** Downside skew: puts below spot price at a higher vol than calls above. */
-  skew: env("VOL_SKEW", 0.1),
+  skew: env("VOL_SKEW", 0.08),
   /** Smile curvature: both wings above the ATM level. */
   smile: env("VOL_SMILE", 0.03),
   /**
