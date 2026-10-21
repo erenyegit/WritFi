@@ -113,12 +113,12 @@ One maker or twenty, the code path is identical.
 
 | | |
 |---|---|
-| WritOptions | `0xd2f64c2fd06AA6B8c295d7C37CE6459D89B4f7B0` |
-| PythAdapter | `0x484E61922DDc7E8f23586fC3B37a6206fcA8DCC6` |
+| WritOptions | `0xca0470B69c5fb9f28C64d65228f3e4879b85b4F2` |
+| Pyth oracle adapter | `0x3B47e405e8195F5528958f568a48c6C723a9E5BD` |
 | TestUSDC (public faucet) | `0x0b76264Bb1eD80e5FB219828464d0C809567e309` |
 | TestBTC (public faucet) | `0xD23c5fA0f4029874be6338fdaDC66e81709DAbFf` |
 
-- ✅ **49 tests passing**, including two solvency-invariant fuzz tests
+- ✅ **83 tests passing**, including settlement against real Pyth updates
 - ✅ A **real option written on-chain**, with the maker's delivery reserved for it
 - ✅ **Both invariants verified live**, one per collateral asset
 - ✅ Contracts **verified with source** on sepolia-explorer.giwa.io
@@ -178,7 +178,7 @@ External makers onboarded against the published quote API ·
 RedStone as a second oracle behind the same adapter seam · position analytics
 
 **Phase 3 — mainnet readiness**
-Bridged USDC and wrapped BTC settlement · permissionless keeper settlement ·
+Bridged USDC and wrapped BTC settlement · multisig ownership and KMS-held keys ·
 higher maker capacity
 
 **Phase 4 — market structure**
@@ -219,7 +219,7 @@ What we need most, in order:
 
 - **Live demo:** https://www.writ.fi
 - **Code:** github.com/erenyegit/writ2
-- **Explorer:** sepolia-explorer.giwa.io/address/0xd2f64c2fd06AA6B8c295d7C37CE6459D89B4f7B0
+- **Explorer:** sepolia-explorer.giwa.io/address/0xca0470B69c5fb9f28C64d65228f3e4879b85b4F2
 - **Network:** GIWA Sepolia · chain 91342
 
 ---

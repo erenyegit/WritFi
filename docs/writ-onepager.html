@@ -76,8 +76,8 @@ no difference is being settled.</p>
 
 <h2>Deployed contracts · GIWA Sepolia</h2>
 <table>
-  <tr><td class="k">WritOptions</td><td class="mono">0xd2f64c2fd06AA6B8c295d7C37CE6459D89B4f7B0</td></tr>
-  <tr><td class="k">PythAdapter</td><td class="mono">0x484E61922DDc7E8f23586fC3B37a6206fcA8DCC6</td></tr>
+  <tr><td class="k">WritOptions</td><td class="mono">0xca0470B69c5fb9f28C64d65228f3e4879b85b4F2</td></tr>
+  <tr><td class="k">Pyth oracle adapter</td><td class="mono">0x3B47e405e8195F5528958f568a48c6C723a9E5BD</td></tr>
   <tr><td class="k">TestUSDC</td><td class="mono">0x0b76264Bb1eD80e5FB219828464d0C809567e309</td></tr>
   <tr><td class="k">TestBTC</td><td class="mono">0xD23c5fA0f4029874be6338fdaDC66e81709DAbFf</td></tr>
   <tr><td class="k">Pyth</td><td class="mono">0x2880aB155794e7179c9eE2e38200202908C17B43</td></tr>
@@ -120,7 +120,7 @@ no difference is being settled.</p>
 <h2>Live on-chain proof</h2>
 <table>
   <tr><th>Metric</th><th>Value</th></tr>
-  <tr><td class="k">Tests passing</td><td>49, including a solvency fuzz test per collateral asset</td></tr>
+  <tr><td class="k">Tests passing</td><td>83, including settlement against real Pyth updates and a solvency check per collateral asset</td></tr>
   <tr><td class="k">Maker funded</td><td class="mono">2,000.000000 USDC · 1.00000000 BTC</td></tr>
   <tr><td class="k">First position</td><td>Put, strike $74,000, size 0.001 BTC, 3-day expiry</td></tr>
   <tr><td class="k">Collateral locked</td><td class="mono">74.000000 USDC</td></tr>
@@ -137,8 +137,8 @@ no difference is being settled.</p>
       accounts, request for quote, public faucets and the first live position.</td></tr>
   <tr><td class="k">Phase 2</td><td>External makers onboarded against the published quote API;
       RedStone as a second oracle behind the same adapter.</td></tr>
-  <tr><td class="k">Phase 3</td><td>Bridged USDC and wrapped BTC settlement, permissionless keeper
-      settlement, mainnet readiness.</td></tr>
+  <tr><td class="k">Phase 3</td><td>Bridged USDC and wrapped BTC settlement, multisig ownership and KMS-held
+      keys, mainnet readiness.</td></tr>
   <tr><td class="k">Phase 4</td><td>KRW-denominated strikes when a KRW stablecoin lands on GIWA.</td></tr>
 </table>
 
