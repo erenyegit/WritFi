@@ -1,10 +1,10 @@
 import type { Viewport } from "next";
-import { Space_Grotesk } from "next/font/google";
+import localFont from "next/font/local";
 
 // The splash keeps its own face; the desk uses IBM Plex.
-const grotesk = Space_Grotesk({
-  subsets: ["latin"],
-  weight: ["500", "700"],
+const grotesk = localFont({
+  src: "../fonts/space-grotesk-latin.woff2",
+  weight: "500 700",
   variable: "--font-grotesk",
 });
 

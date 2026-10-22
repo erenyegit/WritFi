@@ -1,33 +1,42 @@
 import type { Metadata, Viewport } from "next";
-import { IBM_Plex_Mono, IBM_Plex_Sans, IBM_Plex_Serif, Outfit } from "next/font/google";
+import localFont from "next/font/local";
 
 import "./globals.css";
 
+// The faces ship in app/fonts: the latin files Google Fonts serves, under the
+// SIL Open Font License. Fetching them at build time failed on the VPS, where
+// Google answered with font URLs next/font cannot read.
+
 // IBM Plex: the earlier text and headline faces, kept for ?font=plex and for the
 // splash's small print. globals.css maps --font-sans and --font-serif.
-const sans = IBM_Plex_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
+const sans = localFont({
+  src: "./fonts/ibm-plex-sans-latin.woff2",
+  weight: "400 600",
   variable: "--font-plex-sans",
 });
 
-const serif = IBM_Plex_Serif({
-  subsets: ["latin"],
-  weight: ["400", "500"],
+const serif = localFont({
+  src: [
+    { path: "./fonts/ibm-plex-serif-latin-400.woff2", weight: "400" },
+    { path: "./fonts/ibm-plex-serif-latin-500.woff2", weight: "500" },
+  ],
   variable: "--font-plex-serif",
   preload: false,
 });
 
-const mono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
+const mono = localFont({
+  src: [
+    { path: "./fonts/ibm-plex-mono-latin-400.woff2", weight: "400" },
+    { path: "./fonts/ibm-plex-mono-latin-500.woff2", weight: "500" },
+  ],
   variable: "--font-mono",
 });
 
-// The text and headline face: Outfit, a free geometric sans (SIL Open Font
-// License) standing in for Jeko, which needs a paid licence.
-const geo = Outfit({
-  subsets: ["latin"],
+// The text and headline face: Outfit, a free geometric sans standing in for
+// Jeko, which needs a paid licence.
+const geo = localFont({
+  src: "./fonts/outfit-latin.woff2",
+  weight: "100 900",
   variable: "--font-geo",
 });
 
