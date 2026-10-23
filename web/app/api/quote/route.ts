@@ -24,9 +24,7 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     if (err instanceof QuoteError) return NextResponse.json({ error: err.message }, { status: err.status });
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "quote failed" },
-      { status: 503 },
-    );
+    console.error("[quote]", err);
+    return NextResponse.json({ error: "Quoting is unavailable right now." }, { status: 503 });
   }
 }

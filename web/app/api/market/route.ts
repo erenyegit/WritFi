@@ -70,10 +70,9 @@ export async function GET() {
       { headers: { "Cache-Control": "public, s-maxage=5, stale-while-revalidate=10" } },
     );
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "market data unavailable" },
-      { status: 502 },
-    );
+    // Upstream errors can carry provider URLs and request details; keep them in the logs.
+    console.error("[market]", err);
+    return NextResponse.json({ error: "Market data is unavailable right now." }, { status: 502 });
   }
 }
 
