@@ -104,6 +104,9 @@ const SCHEMA = [
   `alter table early_users add column if not exists x_snapshot_at timestamptz`,
   // Set when this account's own referral is decided; its inviter and X account are fixed after.
   `alter table early_users add column if not exists referral_locked_at timestamptz`,
+  // Posts read from X for this wallet today: each read is paid, so it has a daily limit.
+  `alter table early_users add column if not exists post_checks integer not null default 0`,
+  `alter table early_users add column if not exists post_checks_day date`,
   `create index if not exists early_users_board on early_users (points desc, joined_at) where not hidden`,
   `create index if not exists early_users_referred_by on early_users (referred_by)`,
   `create table if not exists early_quests (
@@ -156,6 +159,12 @@ const SCHEMA = [
     used        integer not null default 0
   )`,
   `insert into early_x_sync (id) values (1) on conflict do nothing`,
+  // Where an unfinished full read of the follower list resumes.
+  `alter table early_x_sync add column if not exists full_token text`,
+  `alter table early_x_sync add column if not exists version integer not null default 1`,
+  // Syncs before version 2 could leave followers unread between stored pages;
+  // read the whole list once to fill any such gap.
+  `update early_x_sync set backfilled = false, full_token = null, version = 2 where id = 1 and version < 2`,
 ];
 
 async function migrate(db: Db) {

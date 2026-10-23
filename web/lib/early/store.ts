@@ -23,7 +23,7 @@ import {
 import type { Account, Board, ExportRow, Signal } from "./types";
 import { followCheckReady, followsUs } from "./xfollow";
 import { xConnectReady, type XProfile } from "./xoauth";
-import { postCheckReady, postFacts, postIdFrom } from "./xpost";
+import { postCheckReady, postedAt, postFacts, postIdFrom } from "./xpost";
 
 /** The testnet step is listed but stays closed until the desk's maker is funded. */
 export const testnetQuestOpen = () => process.env.EARLY_TESTNET_QUEST === "on";
@@ -200,20 +200,43 @@ async function confirmPost(address: string, url: string) {
 
   const db = await getDb();
   if (await credited(db.query, address, "post_x")) return;
-  const [me] = await db.query<{ code: string; x_id: string | null }>(
-    `select code, x_id from early_users where address = $1`,
+  const [me] = await db.query<{ code: string; x_id: string | null; joined_at: Date | string }>(
+    `select code, x_id, joined_at from early_users where address = $1`,
     [address],
   );
   if (!me.x_id) throw new EarlyError("Connect your X account first, then post from it.", 409);
   if ((await db.query(`select 1 from early_users where x_post_id = $1 and address <> $2`, [id, address])).length) {
     throw new EarlyError("That post is already linked to another wallet.", 409);
   }
+  // The invite link is made at sign-in, so a post written before it cannot
+  // carry it; no need to ask X. Ten minutes allow for clocks that disagree.
+  if (postedAt(id) < new Date(me.joined_at).getTime() - 10 * 60_000) {
+    throw new EarlyError(
+      "That post is older than your sign-in here. Post the text from the button above, then paste the new link.",
+      422,
+    );
+  }
 
   let facts;
+  let spent = false;
   try {
-    facts = await postFacts(id);
+    facts = await postFacts(id, async () => {
+      await spendPostCheck(db.query, address);
+      spent = true;
+    });
   } catch (err) {
+    if (err instanceof EarlyError) throw err;
     console.error("[early] post lookup failed:", err instanceof Error ? err.message : err);
+    // X answered nothing about the post, so the try does not count against the day's checks.
+    if (spent) {
+      await db
+        .query(
+          `update early_users set post_checks = greatest(post_checks - 1, 0)
+            where address = $1 and post_checks_day = current_date`,
+          [address],
+        )
+        .catch(() => {});
+    }
     throw new EarlyError("X did not answer. Try again in a minute.", 503);
   }
   if (!facts) throw new EarlyError("We could not open that post. Check the link, and that your account is public.", 422);
@@ -237,6 +260,28 @@ async function confirmPost(address: string, url: string) {
 }
 
 /**
+ * Each post read from X costs about $0.005 of the app's credit, and anyone
+ * signed in could paste post after post. A real post needs one check, or a few
+ * when a link is pasted wrong; this many a day per wallet leaves room for that.
+ * Posts already read before are free and not counted.
+ */
+const POST_CHECKS_PER_DAY = 20;
+
+async function spendPostCheck(query: Query, address: string) {
+  const rows = await query(
+    `update early_users
+        set post_checks = case when post_checks_day = current_date then post_checks + 1 else 1 end,
+            post_checks_day = current_date
+      where address = $1 and (post_checks_day is distinct from current_date or post_checks < $2)
+      returning post_checks`,
+    [address, POST_CHECKS_PER_DAY],
+  );
+  if (rows.length === 0) {
+    throw new EarlyError(`That is ${POST_CHECKS_PER_DAY} post checks today, the daily limit. Try again tomorrow.`, 429);
+  }
+}
+
+/**
  * The follow is checked on X for the linked X account, so nobody can claim a
  * follow for an account that is not theirs. Linking checks it once already;
  * this is the button for checking again.
@@ -252,6 +297,12 @@ async function confirmFollow(address: string) {
   const handle = me.x_handle ?? "";
   const found = await followsUs(handle, me.x_id);
   if (found === "busy") throw new EarlyError("We could not check X just now. Try again in a few minutes.", 503);
+  if (found === "paused") {
+    throw new EarlyError(
+      "Follow checks are paused until 00:00 UTC, when X's daily limit resets. Your follow is safe: check again after that.",
+      503,
+    );
+  }
   if (found === "no") {
     throw new EarlyError(
       `We do not see @${handle} among @${X_HANDLE}'s followers yet. Follow, then check again in a minute.`,

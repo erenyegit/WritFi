@@ -23,6 +23,11 @@ const X_NOTICES: Record<string, XNotice> = {
   locked: { text: "This wallet's X account is fixed once an X step or a referral has counted.", tone: "error" },
   signin: { text: "Sign in with your wallet first, then connect X.", tone: "error" },
   failed: { text: "We could not connect X. Try again in a minute.", tone: "error" },
+  expired: { text: "Connecting X took more than 10 minutes. Press Connect X again.", tone: "error" },
+  elsewhere: {
+    text: "X opened in a different browser than the one you signed in with. Go back to your wallet app's browser, log in to x.com there, then press Connect X again.",
+    tone: "error",
+  },
   busy: { text: "We could not connect X. Try again in a minute.", tone: "error" },
   off: { text: "Connecting X is not open yet.", tone: "error" },
 };
@@ -75,6 +80,12 @@ export default function EarlyAccessPage() {
           {early.error && (
             <p className="mt-6 rounded-lg border border-paper-line bg-paper-sunk px-4 py-3 text-[14px] text-ink-700">
               {early.error}
+            </p>
+          )}
+          {/* Signed in, the notice shows in the X step; here when X came back to a browser without the session. */}
+          {xNotice && !early.loading && !early.account && (
+            <p className="mt-6 rounded-lg border border-paper-line bg-paper-sunk px-4 py-3 text-[14px] text-ink-700">
+              {xNotice.text}
             </p>
           )}
           <div className="mt-8">

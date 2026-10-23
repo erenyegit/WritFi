@@ -212,8 +212,11 @@ alerts on the X developer account.
 The follow check keeps a copy of @Writ_Fi's followers in the database. The
 first check reads the whole list once; after that only the newest followers are
 read, at most once a minute across all servers and within `X_DAILY_READ_LIMIT`
-followers a day. Reading your own followers is an X "owned read", $0.001 per
-follower, so a 10,000-follower account costs about $10 to read in full.
+followers a day. A read cut short (an X error, the daily limit) stores nothing
+and the next one starts over, so nobody is skipped; a full read that cannot
+finish resumes where it stopped. Reading your own followers is an X "owned
+read", $0.001 per follower, so a 10,000-follower account costs about $10 to
+read in full. Post checks are limited to 20 paid reads per wallet a day.
 
 Storage is Postgres (`DATABASE_URL`); without it, local development runs an
 embedded Postgres in `web/.data`. The public board shows shortened wallets only.

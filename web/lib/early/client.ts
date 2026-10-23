@@ -32,6 +32,14 @@ function storedRef(): string | null {
   }
 }
 
+/** The invite this visit carries, for a link that takes the visitor to another browser. */
+export function inviteCodeHere(): string | null {
+  const kept = storedRef();
+  if (kept && isCode(kept)) return kept;
+  const fromUrl = new URLSearchParams(window.location.search).get("ref")?.toUpperCase() ?? "";
+  return isCode(fromUrl) ? fromUrl : null;
+}
+
 /**
  * Reads ?ref= once, keeps it for sign-in, and says whether this visit came
  * from an invite. The first invite a visitor arrives with is the one kept.
