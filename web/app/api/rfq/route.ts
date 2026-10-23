@@ -24,9 +24,7 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     if (err instanceof QuoteError) return NextResponse.json({ error: err.message }, { status: err.status });
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "No maker could quote this right now." },
-      { status: 503 },
-    );
+    console.error("[rfq]", err);
+    return NextResponse.json({ error: "No maker could quote this right now." }, { status: 503 });
   }
 }

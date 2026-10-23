@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { formatEther } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
@@ -10,6 +10,7 @@ import { findDue } from "@/lib/desk/keeper";
 import { getVolSurface, marketVolError } from "@/lib/desk/marketVol";
 import { getSpot, pythSpotError } from "@/lib/desk/price";
 import { quoterAddress } from "@/lib/desk/quote";
+import { allow, clientKey } from "@/lib/desk/ratelimit";
 
 export const dynamic = "force-dynamic";
 
@@ -20,11 +21,22 @@ const settle = <T,>(p: Promise<T>) =>
   }));
 
 /**
+ * The keeper runs at 08:05, five minutes after the fixing. A position only
+ * counts as overdue once that run should long since have settled it, so the
+ * gap between fixing and run never reads as an outage.
+ */
+const OVERDUE_AFTER_SEC = 30 * 60;
+
+/**
  * One call that answers "can people trade and will positions settle?". It
  * returns 503 when the answer is no, so an uptime monitor can alert on status
  * alone. Each check reports on its own, and one failing never hides the rest.
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
+  // Every call reads the chain several times; a monitor needs one a minute.
+  if (!allow(clientKey(req, "health"), 30)) {
+    return NextResponse.json({ error: "Too many requests. Wait a moment." }, { status: 429 });
+  }
   const keeperKey = resolveKeeperKey();
   const keeper = keeperKey ? privateKeyToAccount(keeperKey).address : null;
 
@@ -32,7 +44,7 @@ export async function GET() {
     settle(getSpot()),
     settle(readBook()),
     settle(publicClient.getBlockNumber()),
-    settle(findDue()),
+    settle(findDue(Math.floor(Date.now() / 1000) - OVERDUE_AFTER_SEC)),
     keeper ? settle(publicClient.getBalance({ address: keeper })) : Promise.resolve(null),
     settle(Promise.resolve().then(() => quoterAddress())),
     getVolSurface(),
@@ -42,6 +54,7 @@ export async function GET() {
   const paused = book.ok ? book.value.limits.paused : null;
   const signerMatches = !!(maker && quoter.ok && maker.signer.toLowerCase() === quoter.value.toLowerCase());
   const overdue = due.ok ? due.value.groups.reduce((n, g) => n + g.ids.length, 0) : null;
+  const lowEth = keeperBalance && keeperBalance.ok ? keeperBalance.value < deskConfig.lowKeeperWei : null;
 
   const checks = {
     price: spot.ok
@@ -68,15 +81,17 @@ export async function GET() {
         }
       : { ok: false, error: book.ok ? "no maker" : book.error },
     settlement: {
-      ok: overdue === 0,
+      // Nothing may be overdue, and the keeper must be able to pay for the next run.
+      ok: overdue === 0 && lowEth === false,
       overdue,
       keeper,
       keeperEth: keeperBalance && keeperBalance.ok ? formatEther(keeperBalance.value) : null,
+      lowEth,
       ...(due.ok ? {} : { error: due.error }),
     },
   };
 
-  const ok = checks.price.ok && checks.chain.ok && checks.quoter.ok && checks.maker.ok;
+  const ok = checks.price.ok && checks.chain.ok && checks.quoter.ok && checks.maker.ok && checks.settlement.ok;
   return NextResponse.json(
     {
       ok,

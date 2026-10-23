@@ -70,6 +70,8 @@ export const deskConfig = {
   /** Warn when the maker's free balances drop below these. */
   lowUsdc: BigInt(process.env.LOW_LIQUIDITY_USDC ?? 200_000_000), // 200 USDC
   lowBtc: BigInt(process.env.LOW_LIQUIDITY_BTC ?? 2_000_000), // 0.02 BTC
+  /** Below this the keeper may not cover a settlement run's gas. */
+  lowKeeperWei: BigInt(process.env.LOW_KEEPER_WEI ?? 1_000_000_000_000_000), // 0.001 ETH
 };
 
 export function hermesHeaders(): Record<string, string> {

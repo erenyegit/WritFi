@@ -147,7 +147,8 @@ file out; runtime values come from the platform.
   check); `/api/health` reports whether trading and settlement work.
 - Settlement: the daily keeper call that Vercel Cron makes from
   `web/vercel.json` becomes a scheduled task at `5 8 * * *` (UTC) running
-  `curl -fsS -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron/settle`.
+  `curl -sS --fail-with-body -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron/settle`.
+  A failed run still fails the task, and its log keeps the reason.
   Set `CRON_SECRET`; without it anyone can trigger the keeper.
 - Database: a PostgreSQL resource next to the app, with its internal URL as
   `DATABASE_URL` and daily backups to storage off the server.
@@ -155,8 +156,9 @@ file out; runtime values come from the platform.
 ## Operations
 
 - `GET /api/health` returns 503 when trading or settlement is impaired (price
-  feed, chain, maker signer, pause, overdue settlements); point an uptime
-  monitor at it.
+  feed, chain, maker signer, pause, positions still unsettled 30 minutes after
+  their fixing, a keeper holding less than `LOW_KEEPER_WEI`, in wei, default
+  1000000000000000 = 0.001 ETH); point an uptime monitor at it.
 - The keeper needs a little ETH on its key (`KEEPER_PRIVATE_KEY`, or the quoter
   key when unset). `GET /api/cron/settle?dry=1` shows what is due.
 - Hermes keeps about two months of history, and an update stops verifying once

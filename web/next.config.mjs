@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  poweredByHeader: false,
   eslint: { ignoreDuringBuilds: true },
   // A self-contained server in .next/standalone, for running the site in a
   // container (see /Dockerfile). Tracing starts at the workspace root, where
@@ -11,6 +12,23 @@ const nextConfig = {
   output: "standalone",
   experimental: {
     outputFileTracingRoot: path.join(path.dirname(fileURLToPath(import.meta.url)), ".."),
+  },
+  async headers() {
+    // Self-hosted, nothing in front of the app adds these. Nothing embeds the
+    // site, so framing is refused outright (wallet sign-in and the admin page
+    // must never sit inside someone else's frame). Browsers ignore HSTS on
+    // plain-HTTP addresses, so local and temporary hosts are unaffected.
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Strict-Transport-Security", value: "max-age=63072000" },
+        ],
+      },
+    ];
   },
   async redirects() {
     // The site lives at www.writ.fi. On production builds, any *.vercel.app

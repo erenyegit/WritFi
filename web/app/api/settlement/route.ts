@@ -7,10 +7,33 @@ import { allow, clientKey } from "@/lib/desk/ratelimit";
 export const dynamic = "force-dynamic";
 
 /**
+ * A past fixing's update never changes, so each one is fetched from Pyth once
+ * per server and kept. With no CDN in front of the app, this is what keeps the
+ * paid key at one request per expiry however many people settle. The fetch
+ * itself is kept, so a burst right after a fixing shares it; a failure is
+ * dropped and the next request tries again.
+ */
+const updatesByExpiry = new Map<number, Promise<`0x${string}`[]>>();
+const MAX_KEPT = 256;
+
+function settlementUpdate(expiry: number): Promise<`0x${string}`[]> {
+  let updates = updatesByExpiry.get(expiry);
+  if (!updates) {
+    const fetched = fetchSettlementUpdate(expiry);
+    if (updatesByExpiry.size >= MAX_KEPT) updatesByExpiry.delete(updatesByExpiry.keys().next().value!);
+    updatesByExpiry.set(expiry, fetched);
+    fetched.catch(() => {
+      if (updatesByExpiry.get(expiry) === fetched) updatesByExpiry.delete(expiry);
+    });
+    updates = fetched;
+  }
+  return updates;
+}
+
+/**
  * The signed Pyth update for one expiry, proxied so the Pyth key stays on the
- * server. Only listed fixings that have already passed are served, and a past
- * fixing's update never changes, so answers are cached at the edge for good:
- * each expiry costs Pyth one request no matter how many people settle.
+ * server. Only listed fixings that have already passed are served, and answers
+ * are also marked immutable for any cache in front.
  *
  * GET /api/settlement?expiry=1790236800
  */
@@ -26,16 +49,16 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Too many requests. Wait a moment." }, { status: 429 });
   }
   try {
-    const updates = await fetchSettlementUpdate(expiry);
+    const updates = await settlementUpdate(expiry);
     return NextResponse.json(
       { expiry, updates },
       { headers: { "Cache-Control": "public, max-age=3600, s-maxage=31536000, immutable" } },
     );
   } catch (err) {
-    const status = err instanceof SettlementDataError ? err.status : 502;
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "settlement data unavailable" },
-      { status },
-    );
+    if (err instanceof SettlementDataError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
+    }
+    console.error("[settlement]", err);
+    return NextResponse.json({ error: "Settlement data is unavailable right now." }, { status: 502 });
   }
 }

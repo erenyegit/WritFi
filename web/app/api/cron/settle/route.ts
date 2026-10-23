@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { runKeeper } from "@/lib/desk/keeper";
+import { allow, clientKey } from "@/lib/desk/ratelimit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -18,14 +19,19 @@ export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
   const authorized = !secret || req.headers.get("authorization") === `Bearer ${secret}`;
   const dryRun = !authorized || req.nextUrl.searchParams.has("dry");
+  // A dry run still pages through every position on chain.
+  if (!authorized && !allow(clientKey(req, "keeper"), 10)) {
+    return NextResponse.json({ error: "Too many requests. Wait a moment." }, { status: 429 });
+  }
   try {
     const report = await runKeeper({ dryRun });
+    if (report.failed.length > 0) console.error("[keeper] failed", report.failed);
     const status = report.failed.length > 0 ? 500 : 200;
     return NextResponse.json(report, { status, headers: { "Cache-Control": "no-store" } });
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "keeper failed" },
-      { status: 500 },
-    );
+    console.error("[keeper]", err);
+    // The scheduled task prints this body (curl --fail-with-body); anyone else gets no internals.
+    const detail = authorized && err instanceof Error ? err.message.split("\n")[0] : "keeper failed";
+    return NextResponse.json({ error: detail }, { status: 500 });
   }
 }
