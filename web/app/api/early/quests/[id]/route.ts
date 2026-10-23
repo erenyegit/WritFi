@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 /** Complete a step: follow_x, post_x ({ url }) or testnet. Answers with the updated account. */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   if (!sameOrigin(req)) return forbidden();
-  if (!allow(clientKey(req, "early-quest"), 20)) return tooMany();
+  if (!allow(clientKey(req, "early-quest"), 60)) return tooMany();
   try {
     const address = sessionAddress(req);
     if (!address) throw new EarlyError("Sign in first.", 401);

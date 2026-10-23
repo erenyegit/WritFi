@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const origin = publicOrigin(req);
   const back = (x: string) => NextResponse.redirect(new URL(`/early?x=${x}#steps`, origin), 303);
-  if (!allow(clientKey(req, "early-x"), 20)) return back("busy");
+  if (!allow(clientKey(req, "early-x"), 60)) return back("busy");
   if (!xConnectReady()) return back("off");
   const address = sessionAddress(req);
   if (!address) return back("signin");

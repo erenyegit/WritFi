@@ -18,7 +18,10 @@ export function Leaderboard({ board, account }: { board: Board | null; account: 
   const ref = useRef<HTMLDivElement>(null);
   const seen = useSeen(ref);
   const you = account?.rank ?? null;
-  const youOnBoard = you !== null && !!board?.top.some((r) => r.rank === you);
+  // By wallet, not rank: the board and the pass are read at different moments,
+  // and a rank can belong to someone else by the time the board comes in.
+  const me = account ? shortWallet(account.address) : null;
+  const youOnBoard = !!me && !!board?.top.some((r) => r.wallet === me);
   const max = Math.max(1, ...(board?.top.map((r) => r.points) ?? []));
 
   return (
@@ -54,7 +57,7 @@ export function Leaderboard({ board, account }: { board: Board | null; account: 
           </p>
         ) : (
           board.top.map((row, i) => (
-            <Line key={row.rank} row={row} you={row.rank === you} depth={row.points / max} delay={i * 60} />
+            <Line key={row.rank} row={row} you={row.wallet === me} depth={row.points / max} delay={i * 60} />
           ))
         )}
         {account && you !== null && board && board.top.length > 0 && !youOnBoard && (

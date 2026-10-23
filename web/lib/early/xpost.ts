@@ -28,12 +28,16 @@ export interface PostFacts {
   codes: string[];
 }
 
+type XUrls = { urls?: { expanded_url?: string; unwound_url?: string }[] };
+
 interface XPost {
   data?: {
     id: string;
     text?: string;
     author_id?: string;
-    entities?: { urls?: { expanded_url?: string; unwound_url?: string }[] };
+    entities?: XUrls;
+    /** A post over 280 characters: `text` stops at 280, and the rest, links included, is only here. */
+    note_tweet?: { text?: string; entities?: XUrls };
   };
 }
 
@@ -57,7 +61,7 @@ export async function postFacts(id: string, beforeRead?: () => Promise<void>): P
   await beforeRead?.();
   let body: XPost;
   try {
-    body = await ownerGet<XPost>(`/2/tweets/${id}`, { "tweet.fields": "author_id,entities" });
+    body = await ownerGet<XPost>(`/2/tweets/${id}`, { "tweet.fields": "author_id,entities,note_tweet" });
   } catch (err) {
     // Only a 404 is about the post. A 403 is X refusing the app itself (plan,
     // credit, permissions): that must reach the logs, not read as a bad link.
@@ -67,7 +71,11 @@ export async function postFacts(id: string, beforeRead?: () => Promise<void>): P
   // A deleted or protected post comes back as 200 with an errors list and no data.
   if (!body.data?.author_id) return null;
 
-  const codes = codesIn(body.data.text ?? "", body.data.entities?.urls ?? []);
+  const note = body.data.note_tweet;
+  const codes = codesIn(`${body.data.text ?? ""}\n${note?.text ?? ""}`, [
+    ...(body.data.entities?.urls ?? []),
+    ...(note?.entities?.urls ?? []),
+  ]);
   await db.query(
     `insert into early_x_posts (post_id, author_id, codes) values ($1, $2, $3) on conflict (post_id) do nothing`,
     [id, body.data.author_id, codes.join(",")],

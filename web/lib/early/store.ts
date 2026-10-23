@@ -260,6 +260,28 @@ async function confirmPost(address: string, url: string) {
 }
 
 /**
+ * Credits the follow step to everyone whose linked X account now shows up in
+ * the follower copy. Someone who checked while X could not be read (busy, or
+ * reads paused for the day) is settled as soon as a later read, anyone's,
+ * finds the follow, without having to press check again.
+ */
+async function creditFoundFollowers() {
+  if (!followQuestOpen()) return;
+  try {
+    const db = await getDb();
+    const due = await db.query<{ address: string; x_handle: string | null }>(
+      `select u.address, u.x_handle from early_users u
+         join early_x_followers f on f.x_id = u.x_id
+        where not exists (select 1 from early_quests q where q.address = u.address and q.quest = 'follow_x')
+        limit 200`,
+    );
+    for (const u of due) await db.tx((q) => award(q, u.address, "follow_x", `@${u.x_handle ?? ""}`));
+  } catch (err) {
+    console.error("[early] crediting found followers failed:", err instanceof Error ? err.message : err);
+  }
+}
+
+/**
  * Each post read from X costs about $0.005 of the app's credit, and anyone
  * signed in could paste post after post. A real post needs one check, or a few
  * when a link is pasted wrong; this many a day per wallet leaves room for that.
@@ -296,12 +318,16 @@ async function confirmFollow(address: string) {
   if (!me.x_id) throw new EarlyError("Connect your X account first, so we know which account to check.", 409);
   const handle = me.x_handle ?? "";
   const found = await followsUs(handle, me.x_id);
+  await creditFoundFollowers();
   if (found === "busy") throw new EarlyError("We could not check X just now. Try again in a few minutes.", 503);
   if (found === "paused") {
     throw new EarlyError(
       "Follow checks are paused until 00:00 UTC, when X's daily limit resets. Your follow is safe: check again after that.",
       503,
     );
+  }
+  if (found === "soon") {
+    throw new EarlyError("We read new followers once a minute. If you just followed, check again in a minute.", 422);
   }
   if (found === "no") {
     throw new EarlyError(
@@ -365,6 +391,7 @@ export async function linkX(wallet: string, x: XProfile): Promise<"qualified" | 
       if ((await followsUs(x.username, x.id)) === "yes") {
         await db.tx((q) => award(q, address, "follow_x", `@${x.username}`));
       }
+      await creditFoundFollowers();
     } catch (err) {
       console.error("[early] follow check after X sign-in:", err instanceof Error ? err.message : err);
     }
