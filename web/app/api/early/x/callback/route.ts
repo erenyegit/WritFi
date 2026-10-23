@@ -21,7 +21,10 @@ export async function GET(req: NextRequest) {
   };
   const params = req.nextUrl.searchParams;
   const pending = readXAuth(req);
-  if (!pending || params.get("state") !== pending.state) return finish("failed");
+  // No matching start in this browser. Without a wallet session either, X came
+  // back to a different browser or app than the one it started in (common on
+  // phones); with one, the start is over ten minutes old. The page says which.
+  if (!pending || params.get("state") !== pending.state) return finish(sessionAddress(req) ? "expired" : "elsewhere");
   if (sessionAddress(req) !== pending.address) return finish("signin");
   if (params.get("error")) return finish("denied");
   const code = params.get("code");

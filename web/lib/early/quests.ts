@@ -93,7 +93,14 @@ export const isStepOpen = (id: QuestId, open: OpenSteps) =>
 export const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 export const isCode = (s: string) => /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/.test(s);
 
-/** Text for the X post. The invite link is how the post is matched to its author's account. */
+/**
+ * Text for the X post. The invite link is how the post is matched to its
+ * author's account; it is shown on the bare domain, which forwards to www.
+ */
 export function postText(inviteUrl: string) {
-  return `I'm on the early access list for @${X_HANDLE}: BTC options on GIWA that pay you today for the price you'd trade at.\n\n${inviteUrl}`;
+  return (
+    `I just joined early access for @${X_HANDLE}.\n\n` +
+    `Writ is building fully collateralized on-chain options on GIWA, with premiums paid upfront and clear defined outcomes.\n\n` +
+    inviteUrl.replace("://www.", "://")
+  );
 }

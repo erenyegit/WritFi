@@ -8,6 +8,7 @@ import { giwaSepolia } from "@/lib/chain";
 import { fmtBtc8, fmtUsdcAmount, shortAddr } from "@/lib/format";
 import { useWallet } from "@/lib/hooks";
 
+import { OpenInWallet } from "./OpenInWallet";
 import { Popover } from "./Popover";
 
 /**
@@ -31,16 +32,20 @@ export function WalletButton({
   // found named wallets, list those instead of the anonymous one.
   const named = connectors.filter((c) => c.type !== "injected" || c.id !== "injected");
   const choices = named.length > 0 ? named : connectors;
-  const [hasProvider, setHasProvider] = useState(true);
+  const [injectedProvider, setInjectedProvider] = useState(true);
   useEffect(() => {
-    setHasProvider(typeof window !== "undefined" && "ethereum" in window);
+    setInjectedProvider(typeof window !== "undefined" && "ethereum" in window);
   }, []);
+  // A wallet may announce itself over EIP-6963 without setting window.ethereum.
+  const hasProvider = injectedProvider || named.length > 0;
 
   if (!wallet.isConnected) {
     return (
       <Popover
         align={align}
-        panelClassName="w-72"
+        // The header's button sits ~70px from the screen's right edge; keep the
+        // panel on small phones, and let the tall no-wallet panel scroll.
+        panelClassName="w-72 max-w-[calc(100vw-88px)] max-h-[calc(100dvh-5rem)] overflow-y-auto"
         trigger={(open, toggle) => (
           <button
             className={connectClassName}
@@ -58,13 +63,7 @@ export function WalletButton({
       >
         {(close) =>
           !hasProvider ? (
-            <div className="space-y-2 text-[14px]">
-              <p className="font-medium text-ink">No wallet found in this browser.</p>
-              <p className="text-ink-500">
-                Install a browser wallet such as MetaMask or Rabby. On a phone, open writ.fi inside your wallet
-                app&apos;s own browser.
-              </p>
-            </div>
+            <OpenInWallet />
           ) : (
             <div className="space-y-1">
               <div className="label mb-2">Choose a wallet</div>

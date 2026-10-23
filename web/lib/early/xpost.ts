@@ -37,8 +37,16 @@ interface XPost {
   };
 }
 
-/** What a post shows, or null when X has no public post with that id. */
-export async function postFacts(id: string): Promise<PostFacts | null> {
+/** When a post was written, from its id: X ids carry their own timestamp. */
+export function postedAt(id: string): number {
+  return Number((BigInt(id) >> 22n) + 1288834974657n);
+}
+
+/**
+ * What a post shows, or null when X has no public post with that id.
+ * `beforeRead` runs only when the post has to be read from X, the paid case.
+ */
+export async function postFacts(id: string, beforeRead?: () => Promise<void>): Promise<PostFacts | null> {
   const db = await getDb();
   const [kept] = await db.query<{ author_id: string; codes: string }>(
     `select author_id, codes from early_x_posts where post_id = $1`,
@@ -46,11 +54,14 @@ export async function postFacts(id: string): Promise<PostFacts | null> {
   );
   if (kept) return { authorId: kept.author_id, codes: kept.codes ? kept.codes.split(",") : [] };
 
+  await beforeRead?.();
   let body: XPost;
   try {
     body = await ownerGet<XPost>(`/2/tweets/${id}`, { "tweet.fields": "author_id,entities" });
   } catch (err) {
-    if (err instanceof XApiError && (err.status === 404 || err.status === 403)) return null;
+    // Only a 404 is about the post. A 403 is X refusing the app itself (plan,
+    // credit, permissions): that must reach the logs, not read as a bad link.
+    if (err instanceof XApiError && err.status === 404) return null;
     throw err;
   }
   // A deleted or protected post comes back as 200 with an errors list and no data.
