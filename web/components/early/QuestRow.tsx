@@ -30,7 +30,6 @@ interface Props {
   /** X accounts are linked with Sign in with X. */
   connect: boolean;
   /** What came back from Sign in with X, worth saying. */
-  notice: XNotice | null;
   onAccount: (a: Account) => void;
 }
 
@@ -45,7 +44,7 @@ const CONNECT_URL = "/api/early/x/connect";
  * points; and under them, how to do it. On a phone the controls take the
  * points column's width too.
  */
-export function QuestRow({ quest, step, state, last, loading, account, inviteUrl, connect, notice, onAccount }: Props) {
+export function QuestRow({ quest, step, state, last, loading, account, inviteUrl, connect, onAccount }: Props) {
   const done = state === "done";
   const closed = state === "closed";
 
@@ -69,7 +68,8 @@ export function QuestRow({ quest, step, state, last, loading, account, inviteUrl
           </h3>
           {done && <Tag tone="good">Done</Tag>}
           {state === "current" && account && <Tag tone="brand">Next</Tag>}
-          {closed && <Tag tone="muted">Soon</Tag>}
+          {/* Steps read as closed until the account loads; say "Soon" only once that is known. */}
+          {closed && !loading && <Tag tone="muted">Soon</Tag>}
         </div>
         <p className={`mt-1.5 max-w-lg text-[14.5px] leading-relaxed ${done ? "text-ink-400" : "text-ink-500"}`}>
           {quest.body}
@@ -77,7 +77,7 @@ export function QuestRow({ quest, step, state, last, loading, account, inviteUrl
       </div>
 
       <div className="pt-2 text-right">
-        <div className={`num text-[20px] leading-none sm:text-[26px] ${done || closed ? "text-ink-400" : "text-ink"}`}>
+        <div className={`num text-[20px] leading-none sm:text-[26px] ${done || (closed && !loading) ? "text-ink-400" : "text-ink"}`}>
           +{quest.points}
         </div>
         <div className="label mt-1.5 text-[10px]">
@@ -103,7 +103,7 @@ export function QuestRow({ quest, step, state, last, loading, account, inviteUrl
             </a>
           ) : null
         ) : quest.id === "follow_x" ? (
-          <FollowStep account={account} connect={connect} notice={notice} onAccount={onAccount} />
+          <FollowStep account={account} connect={connect} onAccount={onAccount} />
         ) : quest.id === "post_x" ? (
           <PostStep account={account} connect={connect} inviteUrl={inviteUrl} onAccount={onAccount} />
         ) : quest.id === "testnet" ? (
@@ -167,8 +167,13 @@ function useStep(onAccount: (a: Account) => void) {
   return { busy, error, run };
 }
 
-/** An X step's account stays switchable until one of them has been credited. */
-const xLocked = (account: Account) => account.done.includes("follow_x") || account.done.includes("post_x");
+/**
+ * An X step's account stays switchable until one of them has been credited,
+ * or, for an invited account, once linking it has scored the invite (always,
+ * on the first link), as the server holds it.
+ */
+const xLocked = (account: Account) =>
+  account.done.includes("follow_x") || account.done.includes("post_x") || (account.invited && !!account.x);
 
 /**
  * Following is checked on X, against the X account linked to the wallet with
@@ -177,12 +182,10 @@ const xLocked = (account: Account) => account.done.includes("follow_x") || accou
 function FollowStep({
   account,
   connect,
-  notice,
   onAccount,
 }: {
   account: Account;
   connect: boolean;
-  notice: XNotice | null;
   onAccount: (a: Account) => void;
 }) {
   const step = useStep(onAccount);
@@ -227,15 +230,7 @@ function FollowStep({
           "Connect your X account so we can check the follow on it."
         )}
       </p>
-      {step.error ? (
-        <p className="mt-2 text-[13px] leading-snug text-bad">{step.error}</p>
-      ) : (
-        notice && (
-          <p className={`mt-2 text-[13px] leading-snug ${notice.tone === "error" ? "text-bad" : "text-ink-700"}`}>
-            {notice.text}
-          </p>
-        )
-      )}
+      {step.error && <p className="mt-2 text-[13px] leading-snug text-bad">{step.error}</p>}
     </div>
   );
 }

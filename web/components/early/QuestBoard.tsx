@@ -81,23 +81,32 @@ export function QuestBoard({ loading, account, open, inviteUrl, xNotice, onAccou
         </div>
       </div>
 
-      <ol className="py-2 sm:py-3">
-        {QUESTS.map((q, i) => (
-          <QuestRow
-            key={q.id}
-            quest={q}
-            step={i + 1}
-            state={states[i]}
-            last={i === QUESTS.length - 1}
-            loading={loading}
-            account={account}
-            inviteUrl={inviteUrl}
-            connect={open.connect}
-            notice={xNotice}
-            onAccount={onAccount}
-          />
-        ))}
-      </ol>
+      <div>
+        {/* What Sign in with X came back with: here, inside #steps where X sends people back, signed in or not. */}
+        {xNotice && (
+          <p
+            className={`mx-5 mt-5 rounded-lg border border-paper-line bg-paper-sunk px-4 py-3 text-[14px] leading-snug sm:mx-8 ${xNotice.tone === "error" ? "text-bad" : "text-ink-700"}`}
+          >
+            {xNotice.text}
+          </p>
+        )}
+        <ol className="py-2 sm:py-3">
+          {QUESTS.map((q, i) => (
+            <QuestRow
+              key={q.id}
+              quest={q}
+              step={i + 1}
+              state={states[i]}
+              last={i === QUESTS.length - 1}
+              loading={loading}
+              account={account}
+              inviteUrl={inviteUrl}
+              connect={open.connect}
+              onAccount={onAccount}
+            />
+          ))}
+        </ol>
+      </div>
     </div>
   );
 }

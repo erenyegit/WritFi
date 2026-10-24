@@ -24,6 +24,8 @@ export class XApiError extends Error {
   constructor(
     readonly status: number,
     path: string,
+    /** For a 429: when X's rate window reopens, in ms, if X said. */
+    readonly resetAt: number | null = null,
   ) {
     // Ids are left out of the message, so logs do not collect them.
     super(`X answered ${status} for ${path.replace(/\d{5,}/g, ":id")}`);
@@ -42,6 +44,9 @@ export async function ownerGet<T>(path: string, params: Record<string, string>):
     cache: "no-store",
     signal: AbortSignal.timeout(10_000),
   });
-  if (!res.ok) throw new XApiError(res.status, path);
+  if (!res.ok) {
+    const reset = Number(res.headers.get("x-rate-limit-reset"));
+    throw new XApiError(res.status, path, reset > 0 ? reset * 1000 : null);
+  }
   return (await res.json()) as T;
 }

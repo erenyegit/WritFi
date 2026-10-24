@@ -50,14 +50,16 @@ function SignedOut({ invited, auth }: { invited: boolean; auth: Props["auth"] })
 function SignedIn({ account, open, auth }: { account: Account; open: OpenSteps; auth: Props["auth"] }) {
   const { address } = useAccount();
   const switched = !!address && address.toLowerCase() !== account.address.toLowerCase();
-  const steps = QUESTS.filter((q) => isStepOpen(q.id, open) || account.done.includes(q.id));
-  const done = steps.filter((q) => account.done.includes(q.id)).length;
+  // Out of every step, as the steps board counts; one not open yet is "soon", not missing.
+  const available = QUESTS.filter((q) => isStepOpen(q.id, open) || account.done.includes(q.id));
+  const done = QUESTS.filter((q) => account.done.includes(q.id)).length;
+  const progress = done < available.length ? "Keep going" : done < QUESTS.length ? "Next step soon" : "All done";
 
   return (
     <div>
       <dl className="grid max-w-xl grid-cols-2 gap-px overflow-hidden rounded-xl border border-paper-line bg-paper-line sm:grid-cols-3">
         <Stat label="Friends" value={String(account.referrals.counted)} sub={`of ${account.referrals.joined} joined`} />
-        <Stat label="Steps done" value={`${done} / ${steps.length}`} sub={done === steps.length ? "All done" : "Keep going"} />
+        <Stat label="Steps done" value={`${done} / ${QUESTS.length}`} sub={progress} />
         <Stat
           label="X account"
           value={account.x ? `@${account.x}` : "Not linked"}

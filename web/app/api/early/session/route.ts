@@ -12,10 +12,17 @@ import {
   sameOrigin,
   startSession,
 } from "@/lib/early/session";
-import { verifySignIn } from "@/lib/early/signin";
+import { verifySignIn, type SignInRefusal } from "@/lib/early/signin";
 import { getAccount, signIn } from "@/lib/early/store";
 
 export const dynamic = "force-dynamic";
+
+/** Said when a sign-in is refused; a retry only helps in the last case. */
+const REFUSALS: Record<SignInRefusal, string> = {
+  timing: "Your device's clock looks off. Set it to automatic time, then sign in again.",
+  contract: "Smart-contract wallets can't sign in yet. Use a regular wallet such as MetaMask, Rabby or OKX.",
+  invalid: "The signature did not check out. Try signing in again.",
+};
 
 /**
  * Sign in: { message, signature, ref? }. The first sign-in creates the
@@ -23,7 +30,7 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: NextRequest) {
   if (!sameOrigin(req)) return forbidden();
-  if (!allow(clientKey(req, "early-session"), 20)) return tooMany();
+  if (!allow(clientKey(req, "early-session"), 60)) return tooMany();
 
   const body = (await req.json().catch(() => null)) as { message?: unknown; signature?: unknown; ref?: unknown } | null;
   const message = typeof body?.message === "string" ? body.message : "";
@@ -32,15 +39,16 @@ export async function POST(req: NextRequest) {
   const nonce = readNonce(req);
 
   try {
-    const address =
+    const checked =
       signature && nonce
         ? await verifySignIn(message, signature, { domain: req.headers.get("host") ?? "", nonce })
-        : null;
-    if (!address) {
+        : { refused: "invalid" as const };
+    if (!("address" in checked)) {
       return clearNonce(
-        NextResponse.json({ error: "The signature did not check out. Try signing in again." }, { status: 401, headers: noStore }),
+        NextResponse.json({ error: REFUSALS[checked.refused] }, { status: 401, headers: noStore }),
       );
     }
+    const { address } = checked;
 
     const ref = typeof body?.ref === "string" && body.ref ? body.ref : readRef(req);
     await signIn(address, ref);

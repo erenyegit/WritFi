@@ -80,6 +80,8 @@ export function useEarly() {
   const [board, setBoard] = useState<Board | null>(null);
   const [error, setError] = useState<string | null>(null);
   const alive = useRef(true);
+  const signedIn = useRef(false);
+  signedIn.current = !!me?.account;
 
   const loadBoard = useCallback(() => {
     api<Board>("/api/early/board")
@@ -97,7 +99,16 @@ export function useEarly() {
         setMe({ account: null, testnetOpen: false, followOpen: false, postOpen: false, xConnect: false });
       });
     loadBoard();
-    const t = setInterval(loadBoard, 30_000);
+    // A signed-in pass is read again with the board, so points, rank and
+    // friends move when a friend's referral lands while the page is open.
+    const t = setInterval(() => {
+      loadBoard();
+      if (signedIn.current) {
+        api<Me>("/api/early/me")
+          .then((m) => alive.current && setMe(m))
+          .catch(() => undefined); // keep the pass as it was
+      }
+    }, 30_000);
     return () => {
       alive.current = false;
       clearInterval(t);
@@ -137,8 +148,9 @@ export function useSignIn(onAccount: (a: Account | null) => void) {
     setBusy(true);
     setError(null);
     try {
-      const { nonce } = await api<{ nonce: string }>("/api/early/nonce");
-      const issuedAt = new Date();
+      const { nonce, now } = await api<{ nonce: string; now?: number }>("/api/early/nonce");
+      // Server time: a device clock a few minutes off would otherwise be refused.
+      const issuedAt = new Date(typeof now === "number" ? now : Date.now());
       const message = createSiweMessage({
         domain: window.location.host,
         address,

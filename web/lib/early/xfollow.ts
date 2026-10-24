@@ -45,8 +45,12 @@ const dailyReadLimit = () => Math.max(0, Number(process.env.X_DAILY_READ_LIMIT) 
 /** The follow step opens once the site can read @Writ_Fi's followers. */
 export const followCheckReady = () => ownerReady();
 
-/** "paused": today's read limit is spent; reads resume at 00:00 UTC. "busy": X can't be read right now. */
-export type FollowCheck = "yes" | "no" | "busy" | "paused";
+/**
+ * "paused": today's read limit is spent; reads resume at 00:00 UTC. "busy": X
+ * can't be read right now. "soon": not on file, and another check read X a
+ * moment ago, so a follow made since then is not read yet.
+ */
+export type FollowCheck = "yes" | "no" | "soon" | "busy" | "paused";
 
 /** `xId`, when known from Sign in with X, still matches after a username change. */
 export async function followsUs(handle: string, xId?: string | null): Promise<FollowCheck> {
@@ -60,7 +64,7 @@ export async function followsUs(handle: string, xId?: string | null): Promise<Fo
     return "busy";
   }
   if (await onFile(db, handle, xId)) return "yes";
-  return synced === "capped" ? "paused" : synced === "held" ? "busy" : "no";
+  return synced === "capped" ? "paused" : synced === "held" ? "busy" : synced === "recent" ? "soon" : "no";
 }
 
 /** By X user id when known: a username can pass to someone else after a rename. */
@@ -189,7 +193,11 @@ async function sync(db: Db): Promise<SyncOutcome> {
     }
   } catch (err) {
     failure = err;
-    if (err instanceof XApiError && err.status === 429) holdSeconds = RATE_WINDOW_SECONDS;
+    if (err instanceof XApiError && err.status === 429) {
+      // Wait until X says its window reopens, or a whole window when it does not say.
+      const untilReset = err.resetAt ? Math.ceil((err.resetAt - Date.now()) / 1000) + 5 : RATE_WINDOW_SECONDS;
+      holdSeconds = Math.min(RATE_WINDOW_SECONDS, Math.max(gap, untilReset));
+    }
     // X no longer takes the saved place in the list: start the full read over.
     if (full && err instanceof XApiError && err.status === 400) resumeAt = null;
   }
