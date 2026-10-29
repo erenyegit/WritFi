@@ -3,7 +3,6 @@ import Link from "next/link";
 import { GasokProof } from "@/components/GasokProof";
 import { XIcon } from "@/components/Icons";
 import { MARK_PATH } from "@/components/Logo";
-import { TypedHeadline } from "@/components/TypedHeadline";
 import { X_HANDLE, X_URL } from "@/lib/site";
 
 // The mark without its tile: two closed outlines, one per half of the W, cropped
@@ -38,8 +37,8 @@ function Half({ side, d }: { side: "left" | "right"; d: string }) {
 /**
  * Full screen splash. The mark and backdrop are pure CSS (see "coming soon" in
  * globals.css) and every element's resting style is its final state, so reduced
- * motion simply switches the animations off. Only the typed headline and the
- * GASOK card ship client code.
+ * motion simply switches the animations off. Only the GASOK card ships client
+ * code. The mark leads straight to the one way in: early access.
  */
 export function ComingSoon() {
   return (
@@ -55,8 +54,6 @@ export function ComingSoon() {
           </div>
         </div>
 
-        <TypedHeadline text="Coming soon" className="cs-headline" />
-
         <p className="cs-domain">
           writ<span>.fi</span>
         </p>
@@ -67,7 +64,6 @@ export function ComingSoon() {
             →
           </span>
         </Link>
-
       </div>
 
       {/* one bottom row, so the X link stays level with the card at any card height */}

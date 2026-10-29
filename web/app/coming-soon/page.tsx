@@ -4,8 +4,8 @@ import { notFound } from "next/navigation";
 import { ComingSoon } from "@/components/ComingSoon";
 import { X_HANDLE } from "@/lib/site";
 
-const title = "writ.fi — Coming Soon";
-const description = "Writ Fi is coming soon.";
+const title = "Writ Fi — Early access";
+const description = "Join Writ Fi early access and earn Writ Points.";
 // Setting openGraph/twitter here replaces the images inherited from
 // app/opengraph-image.tsx, so the card is pointed at it explicitly.
 const image = { url: "/opengraph-image", width: 1200, height: 630, alt: "Writ Fi" };

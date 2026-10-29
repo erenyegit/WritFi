@@ -573,93 +573,52 @@ summary::-webkit-details-marker {
 
 /* ---- type */
 
-.cs-headline {
-  @apply font-medium;
-  font-family: var(--font-grotesk), ui-sans-serif, system-ui, sans-serif;
-  margin-top: clamp(40px, 8vw, 60px);
-  font-size: clamp(40px, 10vw, 68px);
-  line-height: 1.05;
-  letter-spacing: -0.035em;
-}
-
-/* typed headline: an invisible copy holds the width, the live text types over it */
-.cs-type {
-  @apply relative inline-block;
-  white-space: pre;
-}
-
-.cs-type-sizer {
-  visibility: hidden;
-}
-
-.cs-type-live {
-  @apply absolute left-0 top-0;
-  white-space: pre;
-}
-
-.cs-type-text {
-  color: transparent;
-  -webkit-text-fill-color: transparent;
-  background: linear-gradient(180deg, #ffffff 10%, #b9c5f1 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-}
-
-.cs-caret {
-  display: inline-block;
-  width: max(3px, 0.05em);
-  height: 0.84em;
-  margin-left: 0.05em;
-  vertical-align: -0.04em;
-  border-radius: 2px;
-  background: #8fa5ff;
-  box-shadow: 0 0 14px rgba(120, 146, 255, 0.85);
-  animation: cs-fade 0.6s ease-out 0.9s both;
-}
-
-.cs-caret[data-idle="true"] {
-  animation:
-    cs-fade 0.6s ease-out 0.9s both,
-    cs-caret 1.1s ease-in-out 0.35s infinite;
-}
-
 .cs-domain {
   @apply font-medium;
   font-family: var(--font-grotesk), ui-sans-serif, system-ui, sans-serif;
-  margin-top: clamp(18px, 4vw, 26px);
+  margin-top: clamp(30px, 6vw, 44px);
   font-size: clamp(16px, 4.2vw, 19px);
   letter-spacing: 0.01em;
   color: rgba(222, 229, 250, 0.82);
-  animation: cs-rise-in 1.2s cubic-bezier(0.16, 1, 0.3, 1) 1.55s both;
+  animation: cs-rise-in 1.2s cubic-bezier(0.16, 1, 0.3, 1) 1.1s both;
 }
 
 .cs-domain span {
   color: #8fa5ff;
 }
 
-/* the one way in while the site sits behind the splash */
+/* the one way in while the site sits behind the splash: the brightest thing on the page */
 .cs-cta {
-  @apply inline-flex items-center gap-2 rounded-full font-medium;
+  @apply inline-flex items-center gap-2.5 rounded-full font-medium;
   font-family: var(--font-grotesk), ui-sans-serif, system-ui, sans-serif;
-  margin-top: clamp(24px, 5vw, 34px);
-  height: 42px;
-  padding: 0 20px;
-  font-size: 15px;
+  margin-top: clamp(22px, 5vw, 30px);
+  height: 54px;
+  padding: 0 30px;
+  font-size: 17px;
   letter-spacing: 0.005em;
-  color: rgba(232, 237, 255, 0.92);
-  border: 1px solid rgba(143, 165, 255, 0.32);
-  background: rgba(143, 165, 255, 0.07);
+  color: #070b22;
+  background: linear-gradient(180deg, #ffffff 0%, #ccd6ff 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.6),
+    0 12px 36px -10px rgba(110, 138, 255, 0.75),
+    0 0 64px -12px rgba(110, 138, 255, 0.6);
   transition:
-    color 0.2s ease,
-    border-color 0.2s ease,
-    background-color 0.2s ease;
-  animation: cs-rise-in 1.2s cubic-bezier(0.16, 1, 0.3, 1) 1.85s both;
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+  animation: cs-rise-in 1.2s cubic-bezier(0.16, 1, 0.3, 1) 1.35s both;
 }
 
 .cs-cta:hover {
-  color: #fff;
-  border-color: rgba(143, 165, 255, 0.65);
-  background: rgba(143, 165, 255, 0.14);
+  transform: translate3d(0, -1px, 0);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.8),
+    0 16px 44px -10px rgba(110, 138, 255, 0.9),
+    0 0 80px -10px rgba(110, 138, 255, 0.75);
+}
+
+.cs-cta:focus-visible {
+  outline: 2px solid #8fa5ff;
+  outline-offset: 4px;
 }
 
 .cs-cta-arrow {
@@ -976,12 +935,6 @@ summary::-webkit-details-marker {
 @keyframes cs-glow {
   to {
     opacity: 0.55;
-  }
-}
-
-@keyframes cs-caret {
-  50% {
-    opacity: 0.12;
   }
 }
 
