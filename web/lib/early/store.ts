@@ -5,7 +5,7 @@ import { getAddress } from "viem";
 import { coreAbi } from "@/lib/abi";
 import { deployment } from "@/lib/deployments";
 import { publicClient } from "@/lib/desk/client";
-import { X_HANDLE } from "@/lib/site";
+import { X_HANDLE, X_POST_ID } from "@/lib/site";
 
 import { getDb, type Query } from "./db";
 import { EarlyError } from "./errors";
@@ -18,12 +18,13 @@ import {
   REFERRAL_BASE_LIMIT,
   REFERRAL_BASE_WP,
   VERIFIED_BONUS_WP,
+  X_STEPS,
   type QuestId,
 } from "./quests";
 import type { Account, Board, ExportRow, Signal } from "./types";
 import { followCheckReady, followsUs } from "./xfollow";
-import { xConnectReady, type XProfile } from "./xoauth";
-import { postCheckReady, postedAt, postFacts, postIdFrom } from "./xpost";
+import { likeFromCode, xConnectReady, type LikeRead, type XProfile } from "./xoauth";
+import { postCheckReady, postedAt, postFacts, postIdFrom, repostedBy } from "./xpost";
 
 /** The testnet step is listed but stays closed until the desk's maker is funded. */
 export const testnetQuestOpen = () => process.env.EARLY_TESTNET_QUEST === "on";
@@ -66,6 +67,11 @@ async function award(q: Query, address: string, quest: QuestId, detail: string |
 
 const credited = async (q: Query, address: string, quest: QuestId) =>
   (await q(`select 1 from early_quests where address = $1 and quest = $2`, [address, quest])).length > 0;
+
+async function xStepCredited(q: Query, address: string) {
+  for (const quest of X_STEPS) if (await credited(q, address, quest)) return true;
+  return false;
+}
 
 /**
  * First sign-in creates the account, which is the first step, and records
@@ -181,6 +187,8 @@ export async function completeQuest(wallet: string, quest: string, input: { url?
       return confirmFollow(address);
     case "post_x":
       return confirmPost(address, typeof input.url === "string" ? input.url : "");
+    case "repost_x":
+      return confirmRepost(address);
     case "testnet":
       return confirmTestnet(address);
     default:
@@ -221,22 +229,13 @@ async function confirmPost(address: string, url: string) {
   let spent = false;
   try {
     facts = await postFacts(id, async () => {
-      await spendPostCheck(db.query, address);
+      await spendXCheck(db.query, address);
       spent = true;
     });
   } catch (err) {
     if (err instanceof EarlyError) throw err;
     console.error("[early] post lookup failed:", err instanceof Error ? err.message : err);
-    // X answered nothing about the post, so the try does not count against the day's checks.
-    if (spent) {
-      await db
-        .query(
-          `update early_users set post_checks = greatest(post_checks - 1, 0)
-            where address = $1 and post_checks_day = current_date`,
-          [address],
-        )
-        .catch(() => {});
-    }
+    if (spent) await refundXCheck(db.query, address);
     throw new EarlyError("X did not answer. Try again in a minute.", 503);
   }
   if (!facts) throw new EarlyError("We could not open that post. Check the link, and that your account is public.", 422);
@@ -282,26 +281,113 @@ async function creditFoundFollowers() {
 }
 
 /**
- * Each post read from X costs about $0.005 of the app's credit, and anyone
- * signed in could paste post after post. A real post needs one check, or a few
- * when a link is pasted wrong; this many a day per wallet leaves room for that.
- * Posts already read before are free and not counted.
+ * The repost is looked for on X, among the linked account's posts of the last
+ * seven days, so a repost cannot be claimed for an account that is not yours.
  */
-const POST_CHECKS_PER_DAY = 20;
+async function confirmRepost(address: string) {
+  if (!postQuestOpen()) throw new EarlyError("This step opens soon.", 409);
+  const db = await getDb();
+  if (await credited(db.query, address, "repost_x")) return;
+  const [me] = await db.query<{ x_handle: string | null; x_id: string | null }>(
+    `select x_handle, x_id from early_users where address = $1`,
+    [address],
+  );
+  if (!me.x_id || !me.x_handle) {
+    throw new EarlyError("Connect your X account first, so we know which account to check.", 409);
+  }
 
-async function spendPostCheck(query: Query, address: string) {
+  await spendXCheck(db.query, address);
+  let found;
+  try {
+    found = await repostedBy(me.x_handle, me.x_id, X_POST_ID);
+  } catch (err) {
+    console.error("[early] repost check failed:", err instanceof Error ? err.message : err);
+    await refundXCheck(db.query, address);
+    throw new EarlyError("X did not answer. Try again in a minute.", 503);
+  }
+  if (!found) {
+    throw new EarlyError(
+      `We do not see a repost from @${me.x_handle} in the last 7 days. Repost, then check again in a minute.`,
+      422,
+    );
+  }
+  await db.tx((q) => award(q, address, "repost_x", `@${me.x_handle}`));
+}
+
+/** How a like check came out; the page shows it from ?x=. */
+export type LikeOutcome = "liked" | "notliked" | "likeother" | "likenox" | "likelimit" | "likefailed";
+
+const LIKE_OUTCOMES: Record<Exclude<LikeRead, "yes">, LikeOutcome> = { no: "notliked", other: "likeother" };
+
+/**
+ * X keeps likes private and its list of who liked a post stops at 100 people,
+ * so the like is read from the person's own side: one more Sign in with X, on
+ * the account linked to the wallet, allowed to read that account's likes.
+ */
+export async function confirmLike(
+  wallet: string,
+  code: string,
+  verifier: string,
+  redirect: string,
+): Promise<LikeOutcome> {
+  const address = wallet.toLowerCase();
+  const db = await getDb();
+  if (await credited(db.query, address, "like_x")) return "liked";
+  const [me] = await db.query<{ x_handle: string | null; x_id: string | null }>(
+    `select x_handle, x_id from early_users where address = $1`,
+    [address],
+  );
+  if (!me?.x_id) return "likenox";
+
+  try {
+    await spendXCheck(db.query, address);
+  } catch (err) {
+    if (err instanceof EarlyError) return "likelimit";
+    throw err;
+  }
+  let read: LikeRead;
+  try {
+    read = await likeFromCode(code, verifier, redirect, me.x_id, X_POST_ID);
+  } catch (err) {
+    console.error("[early] like check failed:", err instanceof Error ? err.message : err);
+    await refundXCheck(db.query, address);
+    return "likefailed";
+  }
+  if (read !== "yes") return LIKE_OUTCOMES[read];
+  await db.tx((q) => award(q, address, "like_x", `@${me.x_handle ?? ""}`));
+  return "liked";
+}
+
+/**
+ * Every check that reads X costs the app's credit, and anyone signed in could
+ * press one again and again. A real step needs one check, or a few when a post
+ * has just been made or a link is pasted wrong; this many a day per wallet,
+ * across the post, like and repost steps, leaves room for that. Posts already
+ * read before are free and not counted.
+ */
+const X_CHECKS_PER_DAY = 20;
+
+async function spendXCheck(query: Query, address: string) {
   const rows = await query(
     `update early_users
         set post_checks = case when post_checks_day = current_date then post_checks + 1 else 1 end,
             post_checks_day = current_date
       where address = $1 and (post_checks_day is distinct from current_date or post_checks < $2)
       returning post_checks`,
-    [address, POST_CHECKS_PER_DAY],
+    [address, X_CHECKS_PER_DAY],
   );
   if (rows.length === 0) {
-    throw new EarlyError(`That is ${POST_CHECKS_PER_DAY} post checks today, the daily limit. Try again tomorrow.`, 429);
+    throw new EarlyError(`That is ${X_CHECKS_PER_DAY} checks on X today, the daily limit. Try again tomorrow.`, 429);
   }
 }
+
+/** X answered nothing, so the try does not count against the day's checks. */
+const refundXCheck = (query: Query, address: string) =>
+  query(
+    `update early_users set post_checks = greatest(post_checks - 1, 0)
+      where address = $1 and post_checks_day = current_date`,
+    [address],
+  ).catch(() => {});
 
 /**
  * The follow is checked on X for the linked X account, so nobody can claim a
@@ -367,9 +453,7 @@ export async function linkX(wallet: string, x: XProfile): Promise<"qualified" | 
         );
         return;
       }
-      if (me.x_id && (me.locked || (await credited(q, address, "follow_x")) || (await credited(q, address, "post_x")))) {
-        throw new XLinkError("locked");
-      }
+      if (me.x_id && (me.locked || (await xStepCredited(q, address)))) throw new XLinkError("locked");
       if ((await q(`select 1 from early_users where address <> $1 and x_id = $2`, [address, x.id])).length) {
         throw new XLinkError("taken");
       }

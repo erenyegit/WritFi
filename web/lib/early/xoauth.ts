@@ -7,6 +7,11 @@ import { createHash, randomBytes } from "node:crypto";
  * the snapshot referrals are scored from, and hands the token straight back to
  * X. One profile read, about $0.01 at X's rates.
  *
+ * The like step signs in once more, asking to read likes as well: likes are
+ * private on X, and X's list of who liked a post stops at 100 people. That read
+ * is about $0.01 for the account and $0.001 per like, and its token goes straight
+ * back too.
+ *
  * Needs the developer app's OAuth 2.0 client (X_CLIENT_ID, X_CLIENT_SECRET),
  * with this site's /api/early/x/callback registered as a callback URL.
  */
@@ -15,6 +20,9 @@ const API = process.env.X_API_URL || "https://api.x.com";
 const AUTHORIZE = process.env.X_AUTHORIZE_URL || "https://x.com/i/oauth2/authorize";
 /** X requires tweet.read alongside users.read to read the signed-in account. */
 const SCOPES = "users.read tweet.read";
+const LIKE_SCOPES = `${SCOPES} like.read`;
+/** A like just made is at the top; the larger second page finds one made a while ago. */
+const LIKE_PAGES = [25, 100];
 
 function client() {
   const id = process.env.X_CLIENT_ID;
@@ -42,14 +50,14 @@ export const newState = () => randomBytes(16).toString("base64url");
 export const newVerifier = () => randomBytes(32).toString("base64url");
 const challengeOf = (verifier: string) => createHash("sha256").update(verifier).digest("base64url");
 
-export function authorizeUrl(state: string, verifier: string, redirect: string) {
+export function authorizeUrl(state: string, verifier: string, redirect: string, check?: "like") {
   const c = client();
   if (!c) throw new Error("X OAuth is not configured");
   const query = new URLSearchParams({
     response_type: "code",
     client_id: c.id,
     redirect_uri: redirect,
-    scope: SCOPES,
+    scope: check === "like" ? LIKE_SCOPES : SCOPES,
     state,
     code_challenge: challengeOf(verifier),
     code_challenge_method: "S256",
@@ -57,8 +65,8 @@ export function authorizeUrl(state: string, verifier: string, redirect: string) 
   return `${AUTHORIZE}?${query}`;
 }
 
-/** Trades the code for a token, reads who signed in, then revokes the token. */
-export async function profileFromCode(code: string, verifier: string, redirect: string): Promise<XProfile> {
+/** Trades the code for a token, uses it, then revokes it. */
+async function withToken<T>(code: string, verifier: string, redirect: string, use: (token: string) => Promise<T>) {
   const c = client();
   if (!c) throw new Error("X OAuth is not configured");
   const basic = `Basic ${Buffer.from(`${c.id}:${c.secret}`).toString("base64")}`;
@@ -81,31 +89,7 @@ export async function profileFromCode(code: string, verifier: string, redirect: 
   if (!token) throw new Error("X sent no access token");
 
   try {
-    const meRes = await fetch(`${API}/2/users/me?user.fields=created_at,public_metrics,verified`, {
-      headers: { authorization: `Bearer ${token}` },
-      cache: "no-store",
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!meRes.ok) throw new Error(`X users/me answered ${meRes.status}`);
-    const data = (
-      (await meRes.json()) as {
-        data?: {
-          id?: string;
-          username?: string;
-          created_at?: string;
-          verified?: boolean;
-          public_metrics?: { followers_count?: number };
-        };
-      }
-    ).data;
-    if (!data?.id || !data.username) throw new Error("X did not return the account");
-    return {
-      id: data.id,
-      username: data.username,
-      followers: Math.max(0, Math.floor(Number(data.public_metrics?.followers_count) || 0)),
-      createdAt: data.created_at && !Number.isNaN(Date.parse(data.created_at)) ? data.created_at : null,
-      verified: data.verified === true,
-    };
+    return await use(token);
   } finally {
     // The token is not kept anywhere; revoking it means it cannot be used again.
     await fetch(`${API}/2/oauth2/revoke`, {
@@ -116,4 +100,70 @@ export async function profileFromCode(code: string, verifier: string, redirect: 
       signal: AbortSignal.timeout(4_000),
     }).catch(() => undefined);
   }
+}
+
+async function readAs<T>(token: string, path: string): Promise<T> {
+  const res = await fetch(`${API}${path}`, {
+    headers: { authorization: `Bearer ${token}` },
+    cache: "no-store",
+    signal: AbortSignal.timeout(10_000),
+  });
+  // Ids are left out of the message, so logs do not collect them.
+  if (!res.ok) throw new Error(`X answered ${res.status} for ${path.split("?")[0].replace(/\d{5,}/g, ":id")}`);
+  return (await res.json()) as T;
+}
+
+/** Reads who signed in, once. */
+export function profileFromCode(code: string, verifier: string, redirect: string): Promise<XProfile> {
+  return withToken(code, verifier, redirect, async (token) => {
+    const { data } = await readAs<{
+      data?: {
+        id?: string;
+        username?: string;
+        created_at?: string;
+        verified?: boolean;
+        public_metrics?: { followers_count?: number };
+      };
+    }>(token, "/2/users/me?user.fields=created_at,public_metrics,verified");
+    if (!data?.id || !data.username) throw new Error("X did not return the account");
+    return {
+      id: data.id,
+      username: data.username,
+      followers: Math.max(0, Math.floor(Number(data.public_metrics?.followers_count) || 0)),
+      createdAt: data.created_at && !Number.isNaN(Date.parse(data.created_at)) ? data.created_at : null,
+      verified: data.verified === true,
+    };
+  });
+}
+
+/** "other": the person signed in to an X account that is not the expected one. */
+export type LikeRead = "yes" | "no" | "other";
+
+/** Whether the account `xId` has liked a post, read from its own latest likes. */
+export function likeFromCode(
+  code: string,
+  verifier: string,
+  redirect: string,
+  xId: string,
+  postId: string,
+): Promise<LikeRead> {
+  return withToken(code, verifier, redirect, async (token): Promise<LikeRead> => {
+    const { data } = await readAs<{ data?: { id?: string } }>(token, "/2/users/me");
+    if (!data?.id) throw new Error("X did not return the account");
+    if (data.id !== xId) return "other";
+
+    let next: string | undefined;
+    for (const size of LIKE_PAGES) {
+      const query = new URLSearchParams({ max_results: String(size) });
+      if (next) query.set("pagination_token", next);
+      const page = await readAs<{ data?: { id?: string }[]; meta?: { next_token?: string } }>(
+        token,
+        `/2/users/${xId}/liked_tweets?${query}`,
+      );
+      if (page.data?.some((post) => post.id === postId)) return "yes";
+      next = page.meta?.next_token;
+      if (!next) break;
+    }
+    return "no";
+  });
 }

@@ -175,6 +175,8 @@ steps for Writ Points, and invite friends with `writ.fi/r/<code>` links.
 | Join Early Access | 100 | First sign-in |
 | Follow @Writ_Fi on X | 100 | The linked X account must be in @Writ_Fi's follower list, read with the X API as @Writ_Fi. Checked when the account is linked and again on request |
 | Post about Writ on X | 100 | Looked up once with the X API: the post's author must be the linked X account (by user id) and the post must carry the person's invite link. A post counts for one wallet |
+| Like our post on X | 100 | Read from the person's own likes: one more Sign in with X, with `like.read`, on the linked account. The token is revoked straight after |
+| Repost our post on X | 100 | X's recent search finds the repost from the linked X account (by user id). It reaches back seven days |
 | Write your first option | 200 | `getWriterPositionIds` on the market; closed until `EARLY_TESTNET_QUEST=on` |
 | Bring the Signal | see below | Per qualified referral, scored once from the friend's X profile snapshot |
 
@@ -205,9 +207,15 @@ nothing; the friend can still use early access. A follower count that changes
 later does not rescore the referral.
 
 X bills per resource: the profile read at sign-in is about $0.01 per person, a
-post lookup about $0.005, and follower reads $0.001 each (owned reads). For
-5,000 connected people that is roughly $75 with one post each; set spending
-alerts on the X developer account.
+post lookup about $0.005, and follower reads $0.001 each (owned reads). A like
+check is about $0.035 ($0.01 for the account, $0.001 per like read) and a repost
+check about $0.005, or nothing when no repost is found. For 5,000 connected
+people that is roughly $275 with one check of each; set spending alerts on the X
+developer account.
+
+The like and repost steps ask for the post in `X_POST_ID` (`web/lib/site.ts`).
+X's own list of who liked a post stops at 100 people and is not billed as an
+owned read, so likes are read from each person's side instead.
 
 The follow check keeps a copy of @Writ_Fi's followers in the database. The
 first check reads the whole list once; after that only the newest followers are
@@ -216,7 +224,8 @@ followers a day. A read cut short (an X error, the daily limit) stores nothing
 and the next one starts over, so nobody is skipped; a full read that cannot
 finish resumes where it stopped. Reading your own followers is an X "owned
 read", $0.001 per follower, so a 10,000-follower account costs about $10 to
-read in full. Post checks are limited to 20 paid reads per wallet a day.
+read in full. Post, like and repost checks share a limit of 20 paid reads per
+wallet a day.
 
 Storage is Postgres (`DATABASE_URL`); without it, local development runs an
 embedded Postgres in `web/.data`. The public board shows shortened wallets only.

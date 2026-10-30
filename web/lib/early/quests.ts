@@ -4,7 +4,7 @@ import { X_HANDLE } from "@/lib/site";
  * Early access: the steps that earn Writ Points. Shared by the page and the
  * API, so the number on a card is always the number that gets credited.
  */
-export type QuestId = "waitlist" | "follow_x" | "post_x" | "testnet";
+export type QuestId = "waitlist" | "follow_x" | "post_x" | "like_x" | "repost_x" | "testnet";
 
 export interface Quest {
   id: QuestId;
@@ -30,6 +30,18 @@ export const QUESTS: readonly Quest[] = [
     id: "post_x",
     title: "Post about us on X",
     body: "Share your invite link with your followers, then paste the link to your post.",
+    points: 100,
+  },
+  {
+    id: "like_x",
+    title: "Like our post on X",
+    body: "Like our early access announcement.",
+    points: 100,
+  },
+  {
+    id: "repost_x",
+    title: "Repost our post on X",
+    body: "Repost our early access announcement to your followers.",
     points: 100,
   },
   {
@@ -71,20 +83,28 @@ export const MAX_SIGNAL_WP = AUDIENCE_TIERS[0].wp + VERIFIED_BONUS_WP;
 
 export const questById = (id: string) => QUESTS.find((q) => q.id === id);
 
+/** The steps checked against the linked X account: once one is credited, that link is fixed. */
+export const X_STEPS: readonly QuestId[] = ["follow_x", "post_x", "like_x", "repost_x"];
+
 /** Which of the gated steps can be done right now; the others are listed but closed. */
 export interface OpenSteps {
   /** The desk's maker is funded for the testnet round. */
   testnet: boolean;
   /** The site can check follows of @Writ_Fi on X. */
   follow: boolean;
-  /** The site can look posts up on X. */
+  /** The site can look posts up on X, which also finds reposts. */
   post: boolean;
-  /** X accounts can be linked with Sign in with X. */
+  /** X accounts can be linked with Sign in with X, which also reads the person's likes. */
   connect: boolean;
 }
 
-export const isStepOpen = (id: QuestId, open: OpenSteps) =>
-  id === "testnet" ? open.testnet : id === "follow_x" ? open.follow : id === "post_x" ? open.post : true;
+export function isStepOpen(id: QuestId, open: OpenSteps) {
+  if (id === "testnet") return open.testnet;
+  if (id === "follow_x") return open.follow;
+  if (id === "post_x" || id === "repost_x") return open.post;
+  if (id === "like_x") return open.connect;
+  return true;
+}
 
 /**
  * Invite codes: six characters from an alphabet without look-alikes (no 0/O,

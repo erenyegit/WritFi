@@ -7,7 +7,10 @@ import { completeQuest, getAccount } from "@/lib/early/store";
 
 export const dynamic = "force-dynamic";
 
-/** Complete a step: follow_x, post_x ({ url }) or testnet. Answers with the updated account. */
+/**
+ * Complete a step: follow_x, post_x ({ url }), repost_x or testnet. Answers with
+ * the updated account. The like step goes through Sign in with X instead.
+ */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   if (!sameOrigin(req)) return forbidden();
   if (!allow(clientKey(req, "early-quest"), 60)) return tooMany();

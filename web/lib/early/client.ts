@@ -136,6 +136,9 @@ export function useEarly() {
   };
 }
 
+/** How long after a connect is pressed the signature still follows it. */
+const CONNECT_WINDOW_MS = 2 * 60_000;
+
 /** One signature, no transaction: Sign-In with Ethereum against a server nonce. */
 export function useSignIn(onAccount: (a: Account | null) => void) {
   const { address, chainId } = useAccount();
@@ -180,13 +183,28 @@ export function useSignIn(onAccount: (a: Account | null) => void) {
     }
   }, [address, chainId, signMessageAsync, onAccount]);
 
+  // A sign-in button with no wallet connected asks for both, so the signature
+  // follows the connection with no second button to find. A wallet that
+  // reconnects by itself on page load was not asked for and prompts nothing.
+  const connectPressedAt = useRef(0);
+  const signInAfterConnect = useCallback(() => {
+    connectPressedAt.current = Date.now();
+  }, []);
+  useEffect(() => {
+    if (!address || Date.now() - connectPressedAt.current > CONNECT_WINDOW_MS) return;
+    connectPressedAt.current = 0;
+    void signIn();
+  }, [address, signIn]);
+
   const signOut = useCallback(async () => {
     await api("/api/early/session", { method: "DELETE" }).catch(() => undefined);
     onAccount(null);
   }, [onAccount]);
 
-  return { signIn, signOut, busy, error };
+  return { signIn, signInAfterConnect, signOut, busy, error };
 }
+
+export type SignIn = ReturnType<typeof useSignIn>;
 
 export function completeQuest(id: QuestId, body?: { url: string }) {
   return api<{ account: Account }>(`/api/early/quests/${id}`, {

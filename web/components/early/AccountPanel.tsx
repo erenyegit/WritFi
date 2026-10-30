@@ -3,6 +3,7 @@
 import { useAccount } from "wagmi";
 
 import { WalletButton } from "@/components/WalletButton";
+import type { SignIn } from "@/lib/early/client";
 import { isStepOpen, QUESTS, type OpenSteps } from "@/lib/early/quests";
 import type { Account } from "@/lib/early/types";
 
@@ -13,7 +14,7 @@ interface Props {
   account: Account | null;
   invited: boolean;
   open: OpenSteps;
-  auth: { signIn: () => void; signOut: () => void; busy: boolean; error: string | null };
+  auth: SignIn;
 }
 
 /** The hero's working half: sign in when signed out, where you stand when signed in. */
@@ -22,8 +23,39 @@ export function AccountPanel({ loading, account, invited, open, auth }: Props) {
   return account ? <SignedIn account={account} open={open} auth={auth} /> : <SignedOut invited={invited} auth={auth} />;
 }
 
-function SignedOut({ invited, auth }: { invited: boolean; auth: Props["auth"] }) {
+/**
+ * The one way in, in the hero and on the first step: connects the wallet when
+ * it is not connected, and the signature follows on its own.
+ */
+export function SignInButton({
+  auth,
+  className,
+  connectLabel,
+  panelClassName,
+}: {
+  auth: SignIn;
+  className: string;
+  connectLabel?: string;
+  panelClassName?: string;
+}) {
   const { address, isConnected } = useAccount();
+  return isConnected && address ? (
+    <button className={className} onClick={auth.signIn} disabled={auth.busy}>
+      {auth.busy ? "Check your wallet…" : `Sign in as ${shortWallet(address)}`}
+    </button>
+  ) : (
+    <WalletButton
+      connectClassName={className}
+      connectLabel={connectLabel}
+      panelClassName={panelClassName}
+      align="left"
+      requireGiwa={false}
+      onConnect={auth.signInAfterConnect}
+    />
+  );
+}
+
+function SignedOut({ invited, auth }: { invited: boolean; auth: Props["auth"] }) {
   return (
     <div>
       {invited && (
@@ -33,13 +65,7 @@ function SignedOut({ invited, auth }: { invited: boolean; auth: Props["auth"] })
         </p>
       )}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
-        {isConnected && address ? (
-          <button className="btn-primary h-12 px-6" onClick={auth.signIn} disabled={auth.busy}>
-            {auth.busy ? "Check your wallet…" : `Sign in as ${shortWallet(address)}`}
-          </button>
-        ) : (
-          <WalletButton connectClassName="btn-primary h-12 px-6" align="left" requireGiwa={false} />
-        )}
+        <SignInButton auth={auth} className="btn-primary h-12 px-6" />
         <span className="text-[13.5px] text-ink-400">Free. One signature, no transaction.</span>
       </div>
       {auth.error && <p className="mt-3 max-w-md text-[13px] text-bad">{auth.error}</p>}

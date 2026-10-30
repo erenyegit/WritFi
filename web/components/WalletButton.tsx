@@ -15,12 +15,26 @@ import { Popover } from "./Popover";
  * `connectClassName` and `align` style the connect state, for pages that place
  * it outside the header. `requireGiwa: false` connects on whatever chain the
  * wallet is on and never asks to switch: signing in needs no network.
+ * `onConnect` runs when a connection is asked for, and `connectLabel` and
+ * `panelClassName` fit the button to where it sits.
  */
 export function WalletButton({
   connectClassName = "btn-ink btn-sm",
+  connectLabel = "Connect wallet",
+  // The header's button sits ~70px from the screen's right edge; keep the
+  // panel on small phones, and let the tall no-wallet panel scroll.
+  panelClassName = "w-72 max-w-[calc(100vw-88px)] max-h-[calc(100dvh-5rem)] overflow-y-auto",
   align = "right",
   requireGiwa = true,
-}: { connectClassName?: string; align?: "left" | "right" | "center"; requireGiwa?: boolean } = {}) {
+  onConnect,
+}: {
+  connectClassName?: string;
+  connectLabel?: string;
+  panelClassName?: string;
+  align?: "left" | "right" | "center";
+  requireGiwa?: boolean;
+  onConnect?: () => void;
+} = {}) {
   const chainId = requireGiwa ? giwaSepolia.id : undefined;
   const { connector } = useAccount();
   const { connect, connectors, isPending, error, reset } = useConnect();
@@ -38,26 +52,28 @@ export function WalletButton({
   }, []);
   // A wallet may announce itself over EIP-6963 without setting window.ethereum.
   const hasProvider = injectedProvider || named.length > 0;
+  const start = (choice: (typeof choices)[number]) => {
+    onConnect?.();
+    connect({ connector: choice, chainId });
+  };
 
   if (!wallet.isConnected) {
     return (
       <Popover
         align={align}
-        // The header's button sits ~70px from the screen's right edge; keep the
-        // panel on small phones, and let the tall no-wallet panel scroll.
-        panelClassName="w-72 max-w-[calc(100vw-88px)] max-h-[calc(100dvh-5rem)] overflow-y-auto"
+        panelClassName={panelClassName}
         trigger={(open, toggle) => (
           <button
             className={connectClassName}
             aria-expanded={open}
             onClick={() => {
               reset();
-              if (choices.length === 1 && hasProvider) connect({ connector: choices[0], chainId });
+              if (choices.length === 1 && hasProvider) start(choices[0]);
               else toggle();
             }}
             disabled={isPending}
           >
-            {isPending ? "Connecting…" : "Connect wallet"}
+            {isPending ? "Connecting…" : connectLabel}
           </button>
         )}
       >
@@ -73,7 +89,7 @@ export function WalletButton({
                   className="flex w-full items-center justify-between rounded px-2 py-2 text-left text-[14px] text-ink hover:bg-paper-sunk"
                   onClick={() => {
                     close();
-                    connect({ connector: c, chainId });
+                    start(c);
                   }}
                 >
                   {c.name}

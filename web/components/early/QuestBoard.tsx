@@ -1,5 +1,6 @@
 "use client";
 
+import type { SignIn } from "@/lib/early/client";
 import { isStepOpen, QUESTS, type OpenSteps } from "@/lib/early/quests";
 import type { Account } from "@/lib/early/types";
 
@@ -14,6 +15,7 @@ interface Props {
   /** What came back from Sign in with X, worth saying. */
   xNotice: XNotice | null;
   onAccount: (a: Account) => void;
+  auth: SignIn;
 }
 
 const fmt = (n: number) => n.toLocaleString("en-US");
@@ -23,7 +25,7 @@ const fmt = (n: number) => n.toLocaleString("en-US");
  * what this pass has earned; on the right, the route, one stop per step. A
  * step that is not open yet still shows, so the pass shows what is coming.
  */
-export function QuestBoard({ loading, account, open, inviteUrl, xNotice, onAccount }: Props) {
+export function QuestBoard({ loading, account, open, inviteUrl, xNotice, onAccount, auth }: Props) {
   const isDone = (q: (typeof QUESTS)[number]) => !!account?.done.includes(q.id);
   const isOpen = (q: (typeof QUESTS)[number]) => isStepOpen(q.id, open);
   const next = QUESTS.find((q) => !isDone(q) && isOpen(q));
@@ -31,7 +33,7 @@ export function QuestBoard({ loading, account, open, inviteUrl, xNotice, onAccou
     isDone(q) ? "done" : !isOpen(q) ? "closed" : q === next ? "current" : "open",
   );
 
-  // The dial counts the steps alone; invites come on top, so the pass can pass 500.
+  // The dial counts the steps alone; invites come on top, so the pass can pass its total.
   const total = QUESTS.reduce((n, q) => n + q.points, 0);
   const earned = QUESTS.reduce((n, q, i) => n + (states[i] === "done" ? q.points : 0), 0);
   const steps = states.filter((s) => s === "done").length;
@@ -103,6 +105,7 @@ export function QuestBoard({ loading, account, open, inviteUrl, xNotice, onAccou
               inviteUrl={inviteUrl}
               connect={open.connect}
               onAccount={onAccount}
+              auth={auth}
             />
           ))}
         </ol>
