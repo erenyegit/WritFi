@@ -26,13 +26,22 @@ const X_NOTICES: Record<string, XNotice> = {
   },
   signin: { text: "Sign in with your wallet first, then connect X.", tone: "error" },
   failed: { text: "We could not connect X. Try again in a minute.", tone: "error" },
-  expired: { text: "Connecting X took more than 10 minutes. Press Connect X again.", tone: "error" },
+  expired: { text: "Signing in to X took more than 10 minutes. Press the button again.", tone: "error" },
   elsewhere: {
-    text: "X opened in a different browser than the one you signed in with. Go back to your wallet app's browser, log in to x.com there, then press Connect X again.",
+    text: "X opened in a different browser than the one you signed in with. Go back to your wallet app's browser, log in to x.com there, then try again.",
     tone: "error",
   },
   busy: { text: "We could not connect X. Try again in a minute.", tone: "error" },
   off: { text: "Connecting X is not open yet.", tone: "error" },
+  liked: { text: "We found your like. It's on your pass.", tone: "info" },
+  notliked: {
+    text: "We do not see the like among your latest likes. Like the post, then check again.",
+    tone: "error",
+  },
+  likeother: { text: "That is a different X account. Sign in to X with the account linked here.", tone: "error" },
+  likenox: { text: "Connect your X account first, then check the like.", tone: "error" },
+  likelimit: { text: "That is the daily limit of checks on X. Try again tomorrow.", tone: "error" },
+  likefailed: { text: "We could not check X just now. Try again in a minute.", tone: "error" },
 };
 
 const RULES = [
@@ -106,6 +115,7 @@ export default function EarlyAccessPage() {
           inviteUrl={inviteUrl}
           xNotice={xNotice}
           onAccount={onAccount}
+          auth={auth}
         />
       </Reveal>
 

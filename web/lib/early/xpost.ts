@@ -83,6 +83,28 @@ export async function postFacts(id: string, beforeRead?: () => Promise<void>): P
   return { authorId: body.data.author_id, codes };
 }
 
+interface XSearch {
+  data?: { author_id?: string; referenced_tweets?: { type?: string; id?: string }[] }[];
+}
+
+/**
+ * Whether an account has reposted a post, from X's recent search, which reaches
+ * back seven days. Search bills only the posts it returns, so one check costs
+ * about $0.005, or nothing when no repost is found. The username finds the
+ * account and the X user id confirms it: a username can pass to someone else.
+ */
+export async function repostedBy(username: string, xId: string, postId: string) {
+  const body = await ownerGet<XSearch>("/2/tweets/search/recent", {
+    query: `from:${username} retweets_of_tweet_id:${postId}`,
+    max_results: "10",
+    "tweet.fields": "author_id,referenced_tweets",
+  });
+  return (body.data ?? []).some(
+    (post) =>
+      post.author_id === xId && post.referenced_tweets?.some((ref) => ref.type === "retweeted" && ref.id === postId),
+  );
+}
+
 /** Codes from /r/<code> links and ?ref=<code>, in the expanded links first, then in the text. */
 function codesIn(text: string, urls: { expanded_url?: string; unwound_url?: string }[]) {
   const found = new Set<string>();

@@ -94,6 +94,8 @@ export interface XAuth {
   state: string;
   verifier: string;
   address: string;
+  /** Set when this sign-in checks the like step instead of linking an account. */
+  check?: "like";
 }
 
 /** Holds a Sign in with X for ten minutes, signed like the session so it cannot be forged. */
@@ -109,10 +111,10 @@ export function readXAuth(req: NextRequest): XAuth | null {
   const [payload, mac] = raw?.split(".") ?? [];
   if (!payload || !mac || !equal(mac, sign(payload))) return null;
   try {
-    const { state, verifier, address, e } = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    const { state, verifier, address, check, e } = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
     if (typeof e !== "number" || e * 1000 < Date.now()) return null;
     if (typeof state !== "string" || typeof verifier !== "string" || typeof address !== "string") return null;
-    return { state, verifier, address };
+    return { state, verifier, address, check: check === "like" ? "like" : undefined };
   } catch {
     return null;
   }

@@ -4,10 +4,12 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { CheckIcon, XIcon } from "@/components/Icons";
-import { completeQuest } from "@/lib/early/client";
-import { postText, type Quest } from "@/lib/early/quests";
+import { completeQuest, type SignIn } from "@/lib/early/client";
+import { postText, X_STEPS, type Quest } from "@/lib/early/quests";
 import type { Account } from "@/lib/early/types";
-import { X_HANDLE } from "@/lib/site";
+import { X_HANDLE, X_POST_URL } from "@/lib/site";
+
+import { SignInButton } from "./AccountPanel";
 
 /** `current` is the first step still to do; it is the one the page points at. */
 export type QuestState = "done" | "current" | "open" | "closed";
@@ -31,6 +33,7 @@ interface Props {
   connect: boolean;
   /** What came back from Sign in with X, worth saying. */
   onAccount: (a: Account) => void;
+  auth: SignIn;
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -44,7 +47,7 @@ const CONNECT_URL = "/api/early/x/connect";
  * points; and under them, how to do it. On a phone the controls take the
  * points column's width too.
  */
-export function QuestRow({ quest, step, state, last, loading, account, inviteUrl, connect, onAccount }: Props) {
+export function QuestRow({ quest, step, state, last, loading, account, inviteUrl, connect, onAccount, auth }: Props) {
   const done = state === "done";
   const closed = state === "closed";
 
@@ -98,14 +101,25 @@ export function QuestRow({ quest, step, state, last, loading, account, inviteUrl
           </p>
         ) : !account ? (
           state === "current" ? (
-            <a href="#account" className="btn-primary btn-sm">
-              Sign in to start
-            </a>
+            <div>
+              <SignInButton
+                auth={auth}
+                className="btn-primary btn-sm"
+                connectLabel="Sign in to start"
+                // The board clips what passes its edge, and on a phone this button starts about 100px in.
+                panelClassName="w-72 max-w-[calc(100vw-128px)]"
+              />
+              {auth.error && <p className="mt-2 text-[13px] leading-snug text-bad">{auth.error}</p>}
+            </div>
           ) : null
         ) : quest.id === "follow_x" ? (
           <FollowStep account={account} connect={connect} onAccount={onAccount} />
         ) : quest.id === "post_x" ? (
-          <PostStep account={account} connect={connect} inviteUrl={inviteUrl} onAccount={onAccount} />
+          <PostStep account={account} inviteUrl={inviteUrl} onAccount={onAccount} />
+        ) : quest.id === "like_x" ? (
+          <LikeStep account={account} />
+        ) : quest.id === "repost_x" ? (
+          <RepostStep account={account} onAccount={onAccount} />
         ) : quest.id === "testnet" ? (
           <TestnetStep onAccount={onAccount} />
         ) : null}
@@ -173,7 +187,29 @@ function useStep(onAccount: (a: Account) => void) {
  * on the first link), as the server holds it.
  */
 const xLocked = (account: Account) =>
-  account.done.includes("follow_x") || account.done.includes("post_x") || (account.invited && !!account.x);
+  X_STEPS.some((id) => account.done.includes(id)) || (account.invited && !!account.x);
+
+/** An X step that has to come from the linked account: link it first. */
+function ConnectFirst({ action }: { action: string }) {
+  return (
+    <div className="space-y-2">
+      <a href={CONNECT_URL} className="btn-ink btn-sm">
+        <XIcon className="h-3.5 w-3.5" />
+        Connect X
+      </a>
+      <p className="text-[13px] text-ink-400">Connect your X account first, then {action} from it.</p>
+    </div>
+  );
+}
+
+function OpenPost() {
+  return (
+    <a href={X_POST_URL} target="_blank" rel="noopener noreferrer" className="btn-primary btn-sm">
+      <XIcon className="h-3.5 w-3.5" />
+      Open the post
+    </a>
+  );
+}
 
 /**
  * Following is checked on X, against the X account linked to the wallet with
@@ -237,30 +273,17 @@ function FollowStep({
 
 function PostStep({
   account,
-  connect,
   inviteUrl,
   onAccount,
 }: {
   account: Account;
-  connect: boolean;
   inviteUrl: string | null;
   onAccount: (a: Account) => void;
 }) {
   const [url, setUrl] = useState("");
   const step = useStep(onAccount);
   const intent = inviteUrl ? `https://x.com/intent/tweet?text=${encodeURIComponent(postText(inviteUrl))}` : undefined;
-  // The post has to come from the linked X account, so link it first.
-  if (!account.x) {
-    return (
-      <div className="space-y-2">
-        <a href={CONNECT_URL} className="btn-ink btn-sm">
-          <XIcon className="h-3.5 w-3.5" />
-          Connect X
-        </a>
-        <p className="text-[13px] text-ink-400">Connect your X account first, then post from it.</p>
-      </div>
-    );
-  }
+  if (!account.x) return <ConnectFirst action="post" />;
   return (
     <div className="max-w-md space-y-3">
       <a href={intent} target="_blank" rel="noopener noreferrer" className="btn-primary btn-sm">
@@ -288,6 +311,44 @@ function PostStep({
       </form>
       {account.x && <p className="text-[13px] text-ink-400">Post from @{account.x}.</p>}
       {step.error && <p className="text-[13px] leading-snug text-bad">{step.error}</p>}
+    </div>
+  );
+}
+
+/**
+ * X keeps likes private, so the check signs in to X once more, allowed to read
+ * this account's likes. It leaves the page and comes back with the result.
+ */
+function LikeStep({ account }: { account: Account }) {
+  if (!account.x) return <ConnectFirst action="like" />;
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
+        <OpenPost />
+        <a href={`${CONNECT_URL}?check=like`} className="btn-ink btn-sm">
+          Check my like
+        </a>
+      </div>
+      <p className="mt-2 text-[13px] text-ink-400">
+        Likes are private on X, so X asks you to allow one read of your latest likes on @{account.x}.
+      </p>
+    </div>
+  );
+}
+
+function RepostStep({ account, onAccount }: { account: Account; onAccount: (a: Account) => void }) {
+  const step = useStep(onAccount);
+  if (!account.x) return <ConnectFirst action="repost" />;
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
+        <OpenPost />
+        <button className="btn-ink btn-sm" disabled={step.busy} onClick={() => step.run(() => completeQuest("repost_x"))}>
+          {step.busy ? "Checking on X…" : "Check my repost"}
+        </button>
+      </div>
+      <p className="mt-2 text-[13px] text-ink-400">We check that @{account.x} reposted it.</p>
+      {step.error && <p className="mt-2 text-[13px] leading-snug text-bad">{step.error}</p>}
     </div>
   );
 }

@@ -12,6 +12,8 @@ const STEP_LABELS: Record<string, string> = {
   waitlist: "Waitlist",
   follow_x: "Follow",
   post_x: "Post",
+  like_x: "Like",
+  repost_x: "Repost",
   testnet: "Testnet",
 };
 
